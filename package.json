@@ -1,0 +1,22 @@
+{
+  "name": "create-skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: Skills page — install from the catalog, create and edit skills, watch the prompt budget, compare two skill versions.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "plugin",
+    "skills",
+    "ui"
+  ],
+  "scripts": {
+    "validate:catalog": "node scripts/validate-catalog.mjs"
+  }
+}
