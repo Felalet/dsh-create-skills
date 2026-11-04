@@ -1,22 +1,37 @@
 // Host half of the Create Skills plugin.
-// Serves a small same-origin JSON API for the Skills page. The catalog is read
-// with the scope of a live root agent, so preset-scoped providers (the project
-// filesystem provider among them) contribute just as they do for the model.
+//
+// Serves a small same-origin JSON API for the Skills page: list the catalog,
+// create a skill, edit its frontmatter/body, and enable/disable or delete it.
+// The catalog is read with the scope of a live root agent, so preset-scoped
+// providers (the project filesystem provider among them) contribute just as
+// they do for the model.
 import process from 'node:process';
+import { homedir } from 'node:os';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 
 const PREFIX = '/plugins/create-skills/';
+const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const WRITABLE = new Set(['project-dsh', 'project-agents', 'user-dsh', 'user-agents', 'custom']);
 
 // Diagnostics for the page itself: proves the browser actually called the API.
 const stats = { requests: 0, lastAt: null, lastUserAgent: null, lastProjectRoot: null, mounted: false, events: [] };
 
-function readJsonBody(req, limit = 16 * 1024) {
-  return new Promise((resolve, reject) => {
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function readJsonBody(req, limit = 256 * 1024) {
+  return new Promise((resolveBody, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new Error('payload too large'));
+        reject(new HttpError(413, 'payload too large'));
         req.destroy();
         return;
       }
@@ -25,9 +40,9 @@ function readJsonBody(req, limit = 16 * 1024) {
     req.on('end', () => {
       try {
         const text = Buffer.concat(chunks).toString('utf8');
-        resolve(text === '' ? {} : JSON.parse(text));
+        resolveBody(text === '' ? {} : JSON.parse(text));
       } catch (error) {
-        reject(error);
+        reject(new HttpError(400, `invalid JSON: ${error instanceof Error ? error.message : String(error)}`));
       }
     });
     req.on('error', reject);
@@ -48,6 +63,50 @@ function sendJson(res, status, value) {
     'cache-control': 'no-store',
   });
   res.end(body);
+}
+
+function dshHome() {
+  return process.env.DSH_HOME && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : join(homedir(), '.dsh');
+}
+
+async function exists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The filesystem provider resolves a project as the nearest ancestor with
+// `.git`; mirror that so writes land in the root the provider scans.
+async function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  for (let depth = 0; depth < 24; depth += 1) {
+    if (await exists(join(current, '.git'))) return current;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return resolve(cwd);
+}
+
+function allowedRoots(projectRoot) {
+  return [
+    join(projectRoot, '.dsh', 'skills'),
+    join(projectRoot, '.agents', 'skills'),
+    join(dshHome(), 'skills'),
+    join(dshHome(), 'agents', 'skills'),
+  ];
+}
+
+function assertInside(path, roots) {
+  const target = resolve(path);
+  for (const root of roots) {
+    const base = resolve(root);
+    if (target === base || target.startsWith(base + sep)) return;
+  }
+  throw new HttpError(403, 'path is outside the writable skill roots');
 }
 
 async function resolveView(ctx, requested) {
@@ -125,18 +184,20 @@ function toRow(skill) {
     modelInvocable: skill.invocation?.modelInvocable !== false,
     userInvocable: skill.invocation?.userInvocable !== false,
     weight: weightOf(skill),
+    writable: WRITABLE.has(skill.source) && typeof skill.path === 'string',
   };
 }
 
-async function listSkills(ctx, req, url, res) {
+async function readSnapshot(ctx, view) {
   const skills = ctx.get('skills');
-  if (!skills) {
-    sendJson(res, 503, { error: 'skills service is not available in this profile' });
-    return;
-  }
-
-  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
   const snapshot = await skills.snapshot({ cwd: view.cwd, scope: view.scope });
+  return snapshot;
+}
+
+async function listSkills(ctx, req, url, res) {
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const snapshot = await readSnapshot(ctx, view);
   const rows = snapshot.skills.map(toRow);
 
   stats.requests += 1;
@@ -153,6 +214,159 @@ async function listSkills(ctx, req, url, res) {
   });
 }
 
+async function getSkill(ctx, view, name, res) {
+  const skills = ctx.get('skills');
+  if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
+  const definition = await skills.get(name, { cwd: view.cwd, scope: view.scope });
+  if (!definition) throw new HttpError(404, `skill "${name}" not found`);
+  sendJson(res, 200, { ...toRow(definition), content: definition.content });
+}
+
+function validateName(name) {
+  if (typeof name !== 'string' || !KEBAB.test(name) || name.length > 64) {
+    throw new HttpError(400, 'name must be kebab-case (a-z, 0-9, dashes), up to 64 characters');
+  }
+}
+
+function validateDescription(description) {
+  if (typeof description !== 'string') throw new HttpError(400, 'description is required');
+  const trimmed = description.trim();
+  if (trimmed.length === 0 || trimmed.length > 200 || /[\r\n]/.test(trimmed)) {
+    throw new HttpError(400, 'description must be one line, 1-200 characters');
+  }
+  return trimmed;
+}
+
+function validateWhenToUse(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new HttpError(400, 'whenToUse must be a string');
+  const trimmed = value.trim();
+  if (trimmed.length > 120 || /[\r\n]/.test(trimmed)) {
+    throw new HttpError(400, 'whenToUse must be one line, up to 120 characters');
+  }
+  return trimmed;
+}
+
+function splitFrontmatter(text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) return { frontmatter: '', body: text, fields: {} };
+  const fields = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const field = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (field) fields[field[1]] = field[2].replace(/^["']|["']$/g, '');
+  }
+  return { frontmatter: match[1], body: text.slice(match[0].length), fields };
+}
+
+function quote(value) {
+  return JSON.stringify(value);
+}
+
+function setField(frontmatter, key, value) {
+  const lines = frontmatter === '' ? [] : frontmatter.split(/\r?\n/);
+  const pattern = new RegExp(`^${key}\\s*:`);
+  const index = lines.findIndex((line) => pattern.test(line));
+  if (value === null) {
+    if (index >= 0) lines.splice(index, 1);
+    return lines.join('\n');
+  }
+  const line = `${key}: ${value}`;
+  if (index >= 0) lines[index] = line;
+  else lines.push(line);
+  return lines.join('\n');
+}
+
+function buildSkillFile({ name, description, whenToUse, content }) {
+  const lines = ['---', `name: ${name}`, `description: ${quote(description)}`];
+  if (whenToUse) lines.push(`whenToUse: ${quote(whenToUse)}`);
+  lines.push('---', '');
+  return `${lines.join('\n')}${content.trim()}\n`;
+}
+
+async function writeSkill(ctx, view, body, res) {
+  const scope = body.scope === 'user' ? 'user' : 'project';
+  validateName(body.name);
+  const description = validateDescription(body.description);
+  const whenToUse = validateWhenToUse(body.whenToUse);
+  if (typeof body.content !== 'string' || body.content.trim() === '') {
+    throw new HttpError(400, 'content is required');
+  }
+
+  const projectRoot = await findProjectRoot(view.cwd);
+  const root = scope === 'user' ? join(dshHome(), 'skills') : join(projectRoot, '.dsh', 'skills');
+  assertInside(join(root, body.name), allowedRoots(projectRoot));
+
+  const directory = join(root, body.name);
+  const file = join(directory, 'SKILL.md');
+  if (await exists(file)) throw new HttpError(409, `skill "${body.name}" already exists in ${scope}`);
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(file, buildSkillFile({ name: body.name, description, whenToUse, content: body.content }), 'utf8');
+
+  res.statusCode = 201;
+  sendJson(res, 201, { ok: true, path: file, name: body.name, scope });
+}
+
+async function findWritable(snapshot, name) {
+  const skill = snapshot.skills.find((candidate) => candidate.name === name);
+  if (!skill) throw new HttpError(404, `skill "${name}" not found`);
+  if (!WRITABLE.has(skill.source) || typeof skill.path !== 'string') {
+    throw new HttpError(403, `skill "${name}" is provided by ${skill.source} and is read-only here`);
+  }
+  return skill;
+}
+
+async function updateSkill(ctx, view, body, res) {
+  if (typeof body.name !== 'string') throw new HttpError(400, 'name is required');
+  const snapshot = await readSnapshot(ctx, view);
+  const skill = await findWritable(snapshot, body.name);
+  assertInside(skill.path, allowedRoots(await findProjectRoot(view.cwd)));
+
+  const raw = await readFile(skill.path, 'utf8');
+  const parsed = splitFrontmatter(raw);
+  let frontmatter = parsed.frontmatter;
+  let content = parsed.body;
+
+  if (body.description !== undefined) {
+    frontmatter = setField(frontmatter, 'description', quote(validateDescription(body.description)));
+  }
+  if (body.whenToUse !== undefined) {
+    const whenToUse = validateWhenToUse(body.whenToUse);
+    frontmatter = setField(frontmatter, 'whenToUse', whenToUse === null ? null : quote(whenToUse));
+  }
+  if (body.content !== undefined) {
+    if (typeof body.content !== 'string' || body.content.trim() === '') {
+      throw new HttpError(400, 'content must not be empty');
+    }
+    content = body.content;
+  }
+  if (body.enabled !== undefined) {
+    frontmatter = setField(frontmatter, 'disable-model-invocation', body.enabled ? null : 'true');
+  }
+
+  const next = `---\n${frontmatter}\n---\n\n${content.replace(/^\n+/, '').trimEnd()}\n`;
+  await writeFile(skill.path, next, 'utf8');
+  sendJson(res, 200, { ok: true, path: skill.path, name: skill.name });
+}
+
+async function deleteSkill(ctx, view, url, res) {
+  const name = url.searchParams.get('name');
+  if (!name) throw new HttpError(400, 'name is required');
+  const snapshot = await readSnapshot(ctx, view);
+  const skill = await findWritable(snapshot, name);
+  assertInside(skill.path, allowedRoots(await findProjectRoot(view.cwd)));
+
+  const target = basename(skill.path) === 'SKILL.md' ? dirname(skill.path) : skill.path;
+  assertInside(target, allowedRoots(await findProjectRoot(view.cwd)));
+  await rm(target, { recursive: true, force: true });
+  sendJson(res, 200, { ok: true, removed: target });
+}
+
+function errorResponse(res, error) {
+  const status = error instanceof HttpError ? error.status : 500;
+  sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
+}
+
 export function apply(ctx) {
   const routes = [
     {
@@ -160,14 +374,32 @@ export function apply(ctx) {
       path: `${PREFIX}api/skills`,
       handler: async (req, res) => {
         try {
-          if (req.method !== 'GET' && req.method !== 'HEAD') {
-            sendJson(res, 405, { error: 'method not allowed' });
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          if (req.method === 'GET' || req.method === 'HEAD') {
+            const name = url.searchParams.get('name');
+            if (name) {
+              await getSkill(ctx, view, name, res);
+              return;
+            }
+            await listSkills(ctx, req, url, res);
             return;
           }
-          const url = new URL(req.url ?? '/', 'http://localhost');
-          await listSkills(ctx, req, url, res);
+          if (req.method === 'POST') {
+            await writeSkill(ctx, view, await readJsonBody(req), res);
+            return;
+          }
+          if (req.method === 'PATCH') {
+            await updateSkill(ctx, view, await readJsonBody(req), res);
+            return;
+          }
+          if (req.method === 'DELETE') {
+            await deleteSkill(ctx, view, url, res);
+            return;
+          }
+          sendJson(res, 405, { error: 'method not allowed' });
         } catch (error) {
-          sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          errorResponse(res, error);
         }
       },
     },
