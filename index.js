@@ -7,7 +7,32 @@ import process from 'node:process';
 const PREFIX = '/plugins/create-skills/';
 
 // Diagnostics for the page itself: proves the browser actually called the API.
-const stats = { requests: 0, lastAt: null, lastUserAgent: null, lastProjectRoot: null };
+const stats = { requests: 0, lastAt: null, lastUserAgent: null, lastProjectRoot: null, mounted: false, events: [] };
+
+function readJsonBody(req, limit = 16 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('payload too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve(text === '' ? {} : JSON.parse(text));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
 
 export const name = 'create-skills';
 
@@ -151,6 +176,30 @@ export function apply(ctx) {
       path: `${PREFIX}api/stats`,
       handler: (req, res) => {
         sendJson(res, 200, stats);
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/client-event`,
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' });
+          return;
+        }
+        try {
+          const body = await readJsonBody(req);
+          const event = typeof body.event === 'string' ? body.event : 'unknown';
+          if (event === 'mounted') stats.mounted = true;
+          stats.events.push({
+            event,
+            message: typeof body.message === 'string' ? body.message.slice(0, 500) : null,
+            at: new Date().toISOString(),
+          });
+          if (stats.events.length > 20) stats.events.shift();
+          sendJson(res, 200, { ok: true });
+        } catch (error) {
+          sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
       },
     },
   ];

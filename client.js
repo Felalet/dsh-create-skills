@@ -173,6 +173,14 @@ window.__ModuleLoader__.load({
       static getDerivedStateFromError(error) {
         return { error };
       }
+      componentDidCatch(error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fetch('/plugins/create-skills/api/client-event', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ event: 'error', message }),
+        }).catch(() => {});
+      }
       render() {
         if (this.state.error) {
           const message = this.state.error instanceof Error ? this.state.error.message : String(this.state.error);
@@ -206,6 +214,14 @@ window.__ModuleLoader__.load({
         React.useEffect(() => {
           load();
         }, [load]);
+
+        React.useEffect(() => {
+          fetch('/plugins/create-skills/api/client-event', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ event: 'mounted' }),
+          }).catch(() => {});
+        }, []);
 
         const data = state.status === 'ready' ? state.data : null;
 
