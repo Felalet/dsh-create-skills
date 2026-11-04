@@ -2,7 +2,9 @@
 
 Плагин для DeepSeek Harness: страница **Skills** в боковой панели, каталог скиллов по категориям, создание и правка, бюджет промпта и A/B-сравнение версий скилла.
 
-> Статус: **P0 — проектирование**. Плагин ещё не установлен; код появится на этапе P1.
+> Статус: **P1 — каркас установлен**. В профиле `desktop` активен бандл
+> `create-skills`: страница Skills в сайдбаре со списком скиллов проекта,
+> источником и весом в промпте. Каталог, редактор и A/B — следующие этапы.
 
 ## Что это
 
@@ -30,7 +32,12 @@ create-skills/
   catalog/
     catalog.json           — 10 тестовых скиллов
     sources.md             — источники и лицензии
-  package.json             — манифест плагина (заполняется в P1)
+  package.json             — манифест плагина (dsh.bundle + dsh.client)
+  index.js                 — host: JSON API /plugins/create-skills/api/skills
+  client.js                — web: страница Skills и иконка в сайдбаре
+  cordis.patch.yml         — вставка строки плагина
+  icon.svg                 — иконка панели
+  locale/ru.json, en.json  — meta.title / meta.description для Plugin Manager
 ```
 
 ## Документы

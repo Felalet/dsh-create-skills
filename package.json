@@ -2,12 +2,25 @@
   "name": "create-skills",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: Skills page — install from the catalog, create and edit skills, watch the prompt budget, compare two skill versions.",
   "type": "module",
+  "description": "DSH plugin: Skills page — install from the catalog, create and edit skills, watch the prompt budget, compare two skill versions.",
   "license": "MIT",
-  "engines": {
-    "node": ">=22.19.0"
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "catalog/catalog.json",
+    "locale/*.json",
+    "icon.svg"
+  ],
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -16,7 +29,22 @@
     "skills",
     "ui"
   ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "validate:catalog": "node scripts/validate-catalog.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
   }
 }
