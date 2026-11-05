@@ -108,6 +108,9 @@ window.__ModuleLoader__.load({
       installScope: 'Установить',
       previewSource: 'Источник',
       preview: 'Просмотр',
+      copy: 'Копировать',
+      copied: 'Скопировано',
+      copyFailed: 'Не удалось скопировать',
       tabCompare: 'Сравнение',
       tabArchive: 'Архив',
       archiveEmpty: 'Архив пуст',
@@ -274,6 +277,9 @@ window.__ModuleLoader__.load({
       installScope: 'Install to',
       previewSource: 'Source',
       preview: 'Preview',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Could not copy',
       tabCompare: 'Compare',
       tabArchive: 'Archive',
       archiveEmpty: 'The archive is empty',
@@ -439,6 +445,9 @@ window.__ModuleLoader__.load({
       installScope: '安装到',
       previewSource: '来源',
       preview: '预览',
+      copy: '复制',
+      copied: '已复制',
+      copyFailed: '复制失败',
       tabCompare: '对比',
       tabArchive: '回收站',
       archiveEmpty: '回收站为空',
@@ -2024,7 +2033,46 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { style: styles.form },
-                  h('div', { style: styles.name }, `${t('preview')}: ${sidePreview.name}`),
+                  h(
+                    'div',
+                    {
+                      style: {
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      },
+                    },
+                    h('div', { style: styles.name }, `${t('preview')}: ${sidePreview.name}`),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: 8 } },
+                      sidePreview.status === 'ready'
+                        ? h(
+                            'button',
+                            {
+                              style: Object.assign({}, styles.button, styles.small),
+                              onClick: () => copyText(sidePreview.content, sidePreview.name),
+                            },
+                            t('copy'),
+                          )
+                        : null,
+                      (() => {
+                        const installed = data ? data.skills.find((skill) => skill.name === sidePreview.name) : null;
+                        return installed && installed.writable
+                          ? h(
+                              'button',
+                              {
+                                style: Object.assign({}, styles.button, styles.small),
+                                onClick: () => openEdit(installed),
+                              },
+                              t('edit'),
+                            )
+                          : null;
+                      })(),
+                    ),
+                  ),
                   sidePreview.status === 'loading'
                     ? h('div', { style: styles.note }, t('loading'))
                     : sidePreview.status === 'error'
@@ -2653,11 +2701,21 @@ window.__ModuleLoader__.load({
           );
         };
 
+        const copyText = async (value, label) => {
+          try {
+            await navigator.clipboard.writeText(String(value ?? ''));
+            setNotice({ kind: 'ok', text: `${t('copied')}: ${label}` });
+          } catch {
+            setNotice({ kind: 'error', text: t('copyFailed') });
+          }
+        };
+
         const renderPreview = () => {
           if (!preview) return null;
           const entry = preview.entry;
           const text = catalogText(entry);
           const installed = Boolean(entry.installed);
+          const installedSkill = data ? data.skills.find((skill) => skill.name === entry.name) : null;
           return h(
             'div',
             {
@@ -2693,6 +2751,29 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { style: styles.formActions },
+                preview.status === 'ready'
+                  ? h(
+                      'button',
+                      {
+                        style: Object.assign({}, styles.button, styles.small),
+                        onClick: () => copyText(preview.content, text.title),
+                      },
+                      t('copy'),
+                    )
+                  : null,
+                installedSkill && installedSkill.writable
+                  ? h(
+                      'button',
+                      {
+                        style: Object.assign({}, styles.button, styles.small),
+                        onClick: () => {
+                          setPreview(null);
+                          openEdit(installedSkill);
+                        },
+                      },
+                      t('edit'),
+                    )
+                  : null,
                 h('button', { style: styles.button, onClick: () => setPreview(null) }, t('close')),
                 preview.status === 'ready'
                   ? h(
