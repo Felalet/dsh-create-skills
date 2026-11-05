@@ -805,15 +805,33 @@ window.__ModuleLoader__.load({
         const [categoryDraft, setCategoryDraft] = React.useState(null);
         // Catalog preview: fetched on demand, so installing is a separate decision.
         const [preview, setPreview] = React.useState(null);
+        // The editor and the versions panel render above the list; bumping this
+        // counter scrolls them into view, otherwise a click far down the list
+        // looks like it did nothing.
+        const [panelTick, setPanelTick] = React.useState(0);
+        const editorRef = React.useRef(null);
+        const versionsRef = React.useRef(null);
 
         React.useEffect(() => {
-          if (!preview) return undefined;
+          if (panelTick === 0) return;
+          const node = editor ? editorRef.current : versions ? versionsRef.current : null;
+          if (node && typeof node.scrollIntoView === 'function') {
+            node.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          }
+          // Only the open action should scroll; edits inside the form must not.
+        }, [panelTick]);
+
+        React.useEffect(() => {
+          if (!preview && !editor && !versions) return undefined;
           const onKey = (event) => {
-            if (event.key === 'Escape') setPreview(null);
+            if (event.key !== 'Escape') return;
+            if (preview) setPreview(null);
+            else if (editor) setEditor(null);
+            else if (versions) setVersions(null);
           };
           window.addEventListener('keydown', onKey);
           return () => window.removeEventListener('keydown', onKey);
-        }, [preview]);
+        }, [preview, editor, versions]);
 
         const loadSkills = React.useCallback(async (cwd, quiet = false) => {
           if (quiet) setRefreshing(true);
@@ -924,6 +942,7 @@ window.__ModuleLoader__.load({
         const openCreate = () => {
           setTab('installed');
           setCategoryDraft(null);
+          setPanelTick((value) => value + 1);
           setEditor({
             mode: 'create',
             scope: 'project',
@@ -938,10 +957,13 @@ window.__ModuleLoader__.load({
         };
 
         const openEdit = async (skill) => {
+          track('edit', skill.name);
           setCategoryDraft(null);
           setBusy(skill.name);
           try {
             const body = await api(`/skills?name=${encodeURIComponent(skill.name)}`);
+            setPanelTick((value) => value + 1);
+            setNotice({ kind: 'ok', text: `${t('edit')}: ${skill.name}` });
             setEditor({
               mode: 'edit',
               scope: skill.source === 'user-dsh' ? 'user' : 'project',
@@ -1037,6 +1059,9 @@ window.__ModuleLoader__.load({
         };
 
         const openVersions = async (skill) => {
+          track('versions', skill.name);
+          setPanelTick((value) => value + 1);
+          setNotice({ kind: 'ok', text: `${t('versions')}: ${skill.name}` });
           setVersions({ skill: skill.name, status: 'loading', list: [], label: '', error: null });
           try {
             const body = await api(`/versions?skill=${encodeURIComponent(skill.name)}`);
@@ -1533,7 +1558,12 @@ window.__ModuleLoader__.load({
         const renderEditor = () =>
           h(
             'div',
-            { style: styles.form },
+            { style: styles.form, ref: editorRef },
+            h(
+              'div',
+              { style: styles.name },
+              editor.mode === 'create' ? t('newSkill') : `${t('edit')}: ${editor.name}`,
+            ),
             h(
               'div',
               { style: styles.formRow },
@@ -1741,7 +1771,7 @@ window.__ModuleLoader__.load({
           );
           return h(
             'div',
-            { style: styles.form },
+            { style: styles.form, ref: versionsRef },
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } },
