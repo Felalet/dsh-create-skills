@@ -1,78 +1,71 @@
-# Формат скилла
+# Skill format
 
-Источник: документация `@deepseek-ai/dsh-skill-filesystem` (проверено на установленной сборке).
+Source of truth: the `@deepseek-ai/dsh-skill-filesystem` documentation, checked
+against the DSH build this plugin targets.
 
-## Где лежит
+## Roots and precedence
 
-| Приоритет | Слой | Путь |
-|---:|---|---|
-| 100 | `project-dsh` | `<проект>/.dsh/skills` |
-| 200 | `project-agents` | `<проект>/.agents/skills` |
-| 300 | `custom` | `customSkillDirs` (конфиг провайдера) |
-| 400 | `user-dsh` | `~/.dsh/skills` |
-| 500 | `user-agents` | `~/.agents/skills` |
-| 600 | `bundled` | встроенные в пакеты DSH |
+| Rank | Source | Path |
+|---|---|---|
+| 100 | project DSH | `<project>/.dsh/skills` |
+| 200 | project agents | `<project>/.agents/skills` |
+| 300 | custom | `Config.customSkillDirs` |
+| 400 | user DSH | `~/.dsh/skills` |
+| 500 | user agents | `~/.agents/skills` |
+| 600 | bundled | the provider's own directory |
 
-- Корень проекта — ближайший предок с `.git`; без него — текущая рабочая папка.
-- Скилл — это `<имя>/SKILL.md` **или** плоский `<имя>.md` на верхнем уровне корня.
-- Вложенные `**/SKILL.md` намеренно не находятся.
-- Ближний слой перекрывает дальний при совпадении имён.
+The project root is the nearest ancestor containing `.git`; without one, the
+session's working directory is used. Duplicate names resolve by rank: a nearer
+root shadows a farther one. The plugin writes to the first four roots only.
 
-## Frontmatter
+## File
 
-```yaml
----
-name: office-docx                 # обязателен, kebab-case
-description: Create, read, edit, and validate Word documents (.docx).  # обязателен
-whenToUse: Когда нужен .docx      # опционально
-disable-model-invocation: false   # опционально: убрать из промпта модели
-user-invocable: true              # опционально: доступность через /имя
-metadata:                         # опционально, произвольный JSON
-  category: documents
----
-```
-
-Правила:
-
-- `name` — только `[a-z0-9]+(-[a-z0-9]+)*`, уникален в пределах слоя.
-- `description` — одна строка, до ~200 символов; именно она попадает в промпт.
-- `whenToUse` — уточнение, тоже попадает в каталог.
-- `disable-model-invocation: true` — скилл не виден модели, но остаётся доступен пользователю по `/имя`. Это «выключатель» без удаления.
-- `user-invocable: false` — наоборот, только для модели.
-- Булевы значения принимаются в формах `true/false`, `yes/no`, `on/off`, `1/0` (без учёта регистра); иное — скилл отбрасывается с предупреждением.
-- Тело после `---` — Markdown с инструкциями. Ссылки на `references/`, `scripts/`, `assets/` относительны папке скилла.
-
-## Валидация в Create Skills
-
-При создании/правке проверяем:
-
-1. `name` соответствует regex и не занят в целевом слое.
-2. `description` непустой, ≤ 200 символов, без переводов строки.
-3. `whenToUse` ≤ 120 символов.
-4. Файл начинается с `---`, frontmatter парсится как YAML, есть закрывающий `---`.
-5. Тело непустое (предупреждение, не ошибка).
-6. Для переименования: старое имя не встречается в телах других скиллов и в `metadata` (предупреждение).
-
-## Вес в промпте
-
-```
-weight = ceil((len(name) + len(description) + len(whenToUse or "")) / 4)
-```
-
-Пример: `office-docx` (11) + описание (~75) + 0 → ~22 токена. Каталог из 30 таких скиллов — ~660 токенов в каждом запросе.
-
-## Пример готового файла
+A skill is a directory `<name>/SKILL.md` or a flat `<name>.md` at the top level
+of a scanned root. Nested `**/SKILL.md` is deliberately not discovered.
 
 ```markdown
 ---
-name: release-notes
-description: Собирает release notes из git log между тегами.
-whenToUse: Перед релизом или при подготовке CHANGELOG.
+name: my-skill
+description: "What it does and when to use it — one line, 1-200 characters"
+whenToUse: "Optional trigger refinement, up to 120 characters"
+metadata:
+  category: "development"
 ---
 
-# Release notes
+# Body
 
-1. Найди предыдущий тег: `git describe --tags --abbrev=0`.
-2. Собери коммиты: `git log <tag>..HEAD --oneline`.
-3. Сгруппируй по типам (feat, fix, chore) и переведи на язык пользователя.
+## When to use
+## Steps
+## Check
 ```
+
+Required frontmatter: `name` (kebab-case, `a-z0-9-`) and `description`.
+Optional:
+
+- `whenToUse` — narrows the trigger;
+- `metadata.category` — the category the page shows and filters by;
+- `disable-model-invocation: true` — keeps the skill out of the model catalog
+  (the page then hides it from "Installed" and offers "Enable" in the catalog);
+- `user-invocable: false` — keeps the skill out of the `/` menu.
+
+Unknown keys are preserved by the editor: it rewrites only the fields it owns.
+
+## Validation performed by the plugin
+
+- `name`: `/^[a-z0-9]+(-[a-z0-9]+)*$/`, up to 64 characters;
+- `description`: one line, 1–200 characters, no line breaks;
+- `whenToUse`: one line, up to 120 characters;
+- the body must not be empty when creating.
+
+When writing, the plugin rebuilds the frontmatter (`name`, `description`,
+`whenToUse`, `metadata.category`) and keeps the body as Markdown. An applied
+version is rejected with `422` if its frontmatter has no `name`/`description`,
+because the registry would silently drop such a skill.
+
+## Categories
+
+Category ids are free-form strings. `documents`, `development`, `design` and
+`meta` come from the catalog; `builtin` and `mine` are derived from the source
+when a skill has no `metadata.category`. Custom categories live in
+`<project>/.dsh/skill-categories.json` as `{id, title}` pairs and are merged with
+the catalog and the two built-in ids.

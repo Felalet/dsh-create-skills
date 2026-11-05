@@ -1,85 +1,57 @@
-# Решения (ADR)
+# Decisions
 
-## ADR-001. Проект живёт внутри `default-workspace/create-skills`
+Short records of the choices that shape the plugin. They describe the current
+state, not a roadmap.
 
-**Контекст.** Песочница разрешает запись только в рабочую папку сессии. Отдельная workspace-регистрация делается через UI.
+## ADR-001. Deleting means archiving
 
-**Решение.** Создаём проект как подпапку текущей рабочей области. Пользователь при желании добавляет её как отдельный workspace в сайдбаре.
+Deleting a skill moves its directory to `~/.dsh/skill-archive/<id>/` with a
+`meta.json` that records the name, category, source and original path. The
+archive tab restores it to that path, deletes it permanently, or empties
+everything. Rationale: a skill is hand-written content in a file the user may not
+have a copy of; a misclick must stay recoverable. The installed list therefore
+has no Delete button — deletion lives in the catalog and in the editor.
 
-**Следствия.** Запись без подтверждений; проект легко перенести или запушить. Минус — путь длиннее и проект виден в текущей рабочей области.
+## ADR-002. Comparison reads catalog skills directly
 
-## ADR-002. Каталог — только метаданные
+A catalog side is fetched from `raw.githubusercontent.com` and cached per
+session, so two skills can be compared before either is installed. Installing
+just to compare would pollute the workspace and the prompt. A saved version wins
+over the catalog body, so an AI-improved version of a catalog skill is compared
+by its label.
 
-**Контекст.** У `anthropics/skills` нет объявленной лицензии; встраивать чужой контент в репозиторий рискованно.
+## ADR-003. The installed list shows only enabled skills
 
-**Решение.** В репозитории — `catalog.json` с именем, описанием, категорией и ссылкой. Контент скачивается при установке по действию пользователя.
+"Installed" answers "what does the model see now", so skills with
+`disable-model-invocation` are hidden there while still listed in the catalog
+with an Enable action. The summary shows how many are disabled, and the empty
+state explains where to enable them.
 
-**Следствия.** Репозиторий чистый, каталог легко расширять. Минус — установка требует сети; нужен офлайн-фолбэк (импорт папки).
+## ADR-004. Localization is registered, not global
 
-## ADR-003. По умолчанию — один скилл, «все» — с подтверждением
+The client registers three dictionaries through `ctx.locale.register(ns, {ru,
+en, zh})` and reads the active language from `ctx.locale`. Russian is only in the
+RU dictionary; the check script fails if Cyrillic appears anywhere else. Catalog
+content is bilingual by design: Russian for `ru`, English for every other
+language.
 
-**Контекст.** Каждый скилл добавляет токены в системный промпт каждого запроса.
+## ADR-005. A name conflict is compared before replacing
 
-**Решение.** Основное действие — установить один. «Несколько» — чекбоксы. «Все» — отдельная кнопка с прогнозом прироста и подтверждением.
+Copying a skill into a workspace that already has that name is a merge of two
+hand-edited files. The plugin fetches both bodies, compares them, keeps the local
+one when they are identical, and otherwise shows a diff summary before replacing.
+Replacing archives the previous copy first.
 
-**Следствия.** Пользователь не заваливает промпт случайно. Минус — лишний клик при массовой установке.
+## ADR-006. Project scope is chosen explicitly
 
-## ADR-004. «Выключить» = `disable-model-invocation: true`
+"Project" is the nearest folder with `.git`, which is not always obvious when a
+workspace is created before its project structure exists. The create dialog
+therefore lists the registered workspaces and writes into the chosen one, and the
+same workspace list powers the "Other workspaces" section of the catalog.
 
-**Контекст.** Нужен способ убрать скилл из промпта, не удаляя файлы.
+## ADR-007. AI output language follows the UI
 
-**Решение.** Переключатель пишет `disable-model-invocation: true` во frontmatter. Скилл остаётся доступен по `/имя` и в списке, но не попадает в каталог модели.
-
-**Следствия.** Обратимо, без потери файлов, использует штатный механизм DSH.
-
-## ADR-005. A/B — изоляция версии на уровне агента, с fallback
-
-**Контекст.** Два варианта одного скилла не могут одновременно лежать в одном проектном слое.
-
-**Решение.** Сначала спайк: зарегистрировать вариант в слое конкретного агента (`agent.ctx.skills.register`), чтобы две сессии видели разные версии. Если механизм не подтвердится — последовательный прогон: A, сохранение транскрипта, подмена файла на B, второй прогон, сравнение сохранённых ответов.
-
-**Следствия.** При успехе — настоящий параллельный A/B. При неудаче UX хуже (не одновременно), но результат тот же.
-
-## ADR-006. Транспорт host ↔ client — same-origin HTTP
-
-**Контекст.** `ctx.remote` требует typert-схем и типизированной сборки; плагин
-намеренно plain-JS без сборки.
-
-**Решение.** Точные маршруты `ctx.webServer.register({ kind: 'exact', path })` и
-`fetch()` из страницы. Проверено на живой сборке.
-
-**Следствия.** Нет шага сборки и генерации типов. Минус — маршруты не типизированы,
-контракт держится на договорённости; при росте API нужен общий модуль `api.js`.
-Второй минус: `kind: 'prefix'` на `/plugins/create-skills/` конфликтует с раздачей
-клиентских бандлов, поэтому только точные пути.
-
-## ADR-008. Скоуп чтения каталога — объект Agent
-
-**Контекст.** Глобальный `ctx.skills.list({ cwd })` не видит проектные и
-preset-скиллы: они лежат в слое скоупа агента.
-
-**Решение.** Передавать `scope: agent` (последний живой корневой агент), как это
-делает `dsh-tool-skill`. `cwd` берётся из `workingDirectory.ensure(agent)`.
-
-**Следствия.** Страница показывает тот же каталог, что и модель, включая
-`.dsh/skills` проекта. Минус — без живой сессии виден только глобальный слой.
-
-## ADR-009. Перезагрузка кода плагина при разработке
-
-**Контекст.** Плагин установлен как `link:` на рабочую папку; Node кэширует
-модуль, поэтому правка `index.js` не подхватывается сама.
-
-**Решение.** Для host-правок — `set_plugin` off/on (`include:create-skills`).
-Для клиентских — переустановка бандла (`remove_bundle` + `install_bundle`);
-в худшем случае перезапуск приложения.
-
-**Следствия.** Итерации медленнее, но без ручной сборки. В релизе — версионная
-установка из npm, где этот обход не нужен.
-
-## ADR-007. Интерфейс — русский, с английским словарём
-
-**Контекст.** Пользователь русскоязычный, но проект публичный.
-
-**Решение.** `locale/ru.json` — основной, `locale/en.json` — полный перевод. Тексты только через локаль-сервис.
-
-**Следствия.** Готовность к публикации; небольшой overhead на две локали.
+Category suggestions, grouping, comparison verdicts and improvements ask the
+model to answer in the active UI language (`ru` → Russian, `zh` → Chinese,
+everything else → English). The prompt scaffolding stays Russian/English; only
+the requested output language changes.

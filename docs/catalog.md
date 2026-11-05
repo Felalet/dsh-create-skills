@@ -1,89 +1,65 @@
-# Каталог
+# Catalog
 
-## Назначение
+The installable catalog lives in `catalog/catalog.json` and is bundled with the
+plugin: ten skills from [anthropics/skills](https://github.com/anthropics/skills).
+It is not a copy of those skills — only metadata and a source pointer.
 
-Каталог — список скиллов, которые можно установить в проект, но которые не входят в поставку. В репозитории лежат только метаданные; содержимое скилла скачивается при установке.
-
-## Схема `catalog/catalog.json`
+## File shape
 
 ```json
 {
   "version": 1,
   "updated": "2026-11-05",
+  "source": "https://github.com/anthropics/skills",
   "categories": [
-    { "id": "documents", "title": "Документы", "description": "..." }
+    { "id": "documents", "title": "Документы", "titleEn": "Documents", "description": "...", "descriptionEn": "..." }
   ],
   "skills": [
     {
       "id": "docx",
       "name": "docx",
       "title": "Word-документы",
-      "description": "Создание, чтение и правка .docx.",
+      "titleEn": "Word documents",
+      "description": "...",
+      "descriptionEn": "...",
       "category": "documents",
       "tags": ["word", "docx"],
-      "source": {
-        "type": "github",
-        "repo": "anthropics/skills",
-        "path": "skills/docx",
-        "ref": "main"
-      },
-      "homepage": "https://github.com/anthropics/skills/tree/main/skills/docx",
-      "license": "unspecified"
+      "license": "unspecified",
+      "source": { "type": "github", "repo": "anthropics/skills", "path": "skills/docx", "ref": "main" }
     }
   ]
 }
 ```
 
-Поля записи:
+Rules:
 
-| Поле | Обязательно | Смысл |
-|---|---|---|
-| `id` | да | стабильный ключ внутри каталога |
-| `name` | да | имя устанавливаемого скилла (kebab-case), оно же имя папки |
-| `title` | да | человекочитаемое имя для карточки |
-| `description` | да | 1–2 предложения для карточки и поиска |
-| `category` | да | id категории |
-| `tags` | нет | дополнительные слова для поиска |
-| `source` | да | откуда качать (`github` + `repo`/`path`/`ref`) |
-| `homepage` | нет | ссылка «открыть источник» |
-| `license` | да | `mit`, `apache-2.0`, `unspecified` и т. п. |
+- `id` is unique and used by the API; `name` must be kebab-case and matches the
+  directory name used on install;
+- `category` must exist in `categories`;
+- `source.type` is `github`; `path` is the skill directory inside the repository;
+  `ref` is a branch or tag;
+- Russian `title`/`description` are shown for the `ru` locale, English
+  `titleEn`/`descriptionEn` for every other language.
 
-## Категории
+`node scripts/validate-catalog.mjs` checks all of the above.
 
-`documents` (4), `development` (3), `design` (2), `meta` (1). Категория — только для навигации; в `SKILL.md` она попадает через `metadata.category`, если скилл установлен через Create Skills.
+## Install flow
 
-## Установка
+1. The client posts the selected ids and the scope (`project`/`user`).
+2. The host downloads `https://codeload.github.com/<repo>/tar.gz/<ref>`.
+3. The tarball is parsed in memory; only files under `<path>/` are copied, with a
+   containment check per entry.
+4. Symlinks are recreated when their target stays inside the skill, and the
+   executable bit is preserved on POSIX.
+5. `SKILL.md` must exist and carry `name` + `description`, otherwise the copied
+   directory is removed and an error is reported.
 
-1. Пользователь выбирает записи (одну, несколько, все).
-2. Плагин проверяет, нет ли уже скилла с таким именем в целевом слое.
-3. Скачивает `https://codeload.github.com/<repo>/tar.gz/<ref>` во временную папку.
-4. Проверяет, что внутри есть `<path>/SKILL.md`, и что frontmatter валиден.
-5. Копирует **только** папку скилла в `<корень>/<name>/`.
-6. Ничего не исполняет: `scripts/` — обычные файлы.
-7. Возвращает отчёт и новый бюджет.
+Installed entries show up as "installed" in the catalog; the row then offers
+disable and delete (delete moves the installed copy to the archive).
 
-Ограничения: размер архива ≤ 20 МБ, распаковка только внутри временной папки, отказ при выходе за `<path>/`.
+## Preview
 
-## Лицензии
-
-У `anthropics/skills` нет объявленной лицензии (GitHub API: `license: null`). Поэтому:
-
-- контент скиллов **не коммитится** в этот репозиторий;
-- каталог хранит только метаданные и ссылку;
-- скачивание инициирует пользователь, файлы остаются в его проекте;
-- в карточке показывается `license` и ссылка на источник.
-
-Если появится скилл с явной лицензией (MIT/Apache), его можно будет включить в поставку отдельным решением.
-
-## Как добавить запись
-
-1. Проверить, что upstream содержит `<path>/SKILL.md` с валидным frontmatter.
-2. Добавить объект в `skills`, проверить уникальность `id` и `name`.
-3. Указать `license` и `homepage`.
-4. Прогнать `node scripts/validate-catalog.mjs` (появится в P1).
-
-## Что дальше
-
-- v0.2: удалённый каталог по URL (`catalogUrl` в конфиге) с кэшем и офлайн-фолбэком.
-- v0.3: проверка контрольной суммы и подписи источника.
-- v0.4: категории и теги из `metadata` установленных скиллов, чтобы каталог и установленное жили в одной таксономии.
+`GET /api/preview?id=...` fetches only `<repo>/<ref>/<path>/SKILL.md` from
+`raw.githubusercontent.com`, caches it per session (512 KB cap) and returns it
+together with the entry metadata. The dialog renders the text in a `<pre>`; a
+Copy button puts it on the clipboard.

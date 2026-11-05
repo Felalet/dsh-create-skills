@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DSH plugin: Skills page — install from the catalog, create and edit skills, watch the prompt budget, compare two skill versions.",
+  "description": "DSH plugin: skills catalog with preview, editor, versions, archive (trash) and A/B comparison with AI improvement.",
   "license": "MIT",
+  "author": "VladSparrow",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
@@ -19,21 +20,32 @@
     "cordis.patch.yml",
     "catalog/catalog.json",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs"
   ],
   "keywords": [
     "deepseek-harness",
     "dsh",
+    "dsh-plugin",
     "cordis",
     "plugin",
     "skills",
+    "agent-skills",
     "ui"
   ],
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "validate:catalog": "node scripts/validate-catalog.mjs"
+    "validate:catalog": "node scripts/validate-catalog.mjs",
+    "check": "node scripts/check-client.mjs",
+    "test": "node scripts/check-client.mjs && node scripts/validate-catalog.mjs && node scripts/test-archive.mjs",
+    "test:preview": "node scripts/test-preview.mjs"
   },
   "dsh": {
     "bundle": {

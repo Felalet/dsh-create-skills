@@ -1,0 +1,17 @@
+# Normalize line endings for a cross-platform repository.
+* text=auto eol=lf
+
+# Keep binary assets untouched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+
+# Text assets stay LF.
+*.svg text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.py text eol=lf

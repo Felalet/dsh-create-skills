@@ -1,104 +1,89 @@
-# Архитектура
+# Architecture
 
-## Компоненты
+Create Skills is a DeepSeek Harness plugin with two halves that share one
+package.
 
 ```
-┌──────────────────────────── Web GUI ────────────────────────────┐
-│  sidebar.panellist: id=create-skills                            │
-│  main[key=create-skills]: React-страница                        │
-│    Installed │ Catalog │ Compare                                │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ remote / HTTP
-┌───────────────────────────────▼─────────────────────────────────┐
-│  Host-плагин create-skills                                       │
-│  сервис skillStudio:                                             │
-│    list(projectRoot)      → ctx.skills.list({ cwd })             │
-│    budget(projectRoot)    → оценка токенов каталога              │
-│    create/update/remove   → запись SKILL.md                      │
-│    catalog()              → catalog.json + состояние установки   │
-│    install(ids, root)     → download → validate → copy           │
-│    versions/runCompare    → A/B (P4)                             │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ fs
-        <проект>/.dsh/skills/<имя>/SKILL.md
-        ~/.dsh/skills/<имя>/SKILL.md
-        <проект>/.dsh/skill-versions/...   (P4)
+client.js  ── browser half (page, dialogs, dictionaries, context-menu entry)
+index.js   ── host half   (HTTP JSON API under /plugins/create-skills/api)
 ```
 
-## Почему так
+## Host half
 
-- **Страница, а не скилл.** Пользователь просит «кнопку Skills» как Plugins/Schedules/Context — это слоты `sidebar.panellist` + `main`, то есть клиентский плагин.
-- **Host-сервис, а не клиентские файловые операции.** Браузер не имеет доступа к файловой системе; чтение каталога и запись `SKILL.md` идут через `ctx.skills` и `ctx.fs` на хосте, с проверкой песочницы.
-- **Источник истины — диск.** Список скиллов не хранится в плагине: `ctx.skills.list` — это уже объединённый каталог всех провайдеров (проект, пользователь, встроенные). Watcher сам инвалидирует кэш после записи.
-- **Каталог — данные, не код.** `catalog.json` в бандле; установка скачивает upstream-папку. Обновление каталога не требует релиза плагина, если позже вынести его на URL.
+A Cordis plugin (`name`, `inject: ['webServer']`) that registers exact routes on
+the DSH web server. It talks to the DSH services `skills`, `agents` and
+`sessions` to resolve the current workspace and the skill registry snapshot.
 
-## Данные
+| Route | Purpose |
+|---|---|
+| `GET /skills` | installed skills + categories for the current workspace |
+| `GET/POST/PATCH/DELETE /skills` | read one skill, create, edit, enable/disable, hard delete (unused by the UI) |
+| `POST /archive`, `GET /archive` | move a skill to the trash, list the trash |
+| `POST /archive/restore`, `/archive/delete`, `/archive/empty` | restore, delete permanently, empty |
+| `GET /catalog` | installable catalog entries with an `installed` flag |
+| `POST /install` | install catalog entries (project or user scope) |
+| `GET /preview` | one `SKILL.md` from the upstream repository, cached |
+| `GET/POST /versions`, `/versions/apply`, `/versions/prune` | skill versions |
+| `POST /compare` | AI comparison of two variants |
+| `POST /improve` | AI improvement, stored as a new version |
+| `POST /categories`, `DELETE /categories` | custom categories |
+| `POST /suggest-category`, `POST /group` | AI category suggestion and task grouping |
+| `GET /workspaces`, `GET /workspace-skills` | registered workspaces and their project skills |
+| `POST /skills/copy`, `/skills/collect`, `/skills/conflict` | cross-workspace copy, bulk collect, conflict comparison |
+| `POST /pick-folder` | the host directory picker |
+| `GET /session-path` | working directory of a session (for the context-menu entry) |
+| `POST /client-event`, `GET /stats` | client diagnostics and counters |
 
-`SkillSummary` (из реестра): `name`, `description`, `whenToUse?`, `path?`, `source` (`project-dsh`, `project-agents`, `user-dsh`, `user-agents`, `custom`, `bundled`), `provider`, `invocation { modelInvocable, userInvocable }`.
+Every write is checked against the writable skill roots: project
+`.dsh/skills`, `.agents/skills`, `~/.dsh/skills`, `~/.agents/skills`. Path
+containment uses `path.relative`, so `..`, the filesystem root, case differences
+on Windows/macOS and other drives are handled.
 
-На странице показываем: имя, описание, слой (проект/пользователь/встроенный), провайдер, вес (токены), флаги. Путь к `SKILL.md` — для «открыть файл» и диагностики.
+## Client half
 
-## Потоки
+`window.__ModuleLoader__.load` registers a module with `inject: ['slots',
+'locale', 'layout']` and contributes:
 
-### Список
+- `main` panel `create-skills` — the page (installed, catalog, compare, archive);
+- `sidebar.panellist` — the sidebar entry with the puzzle glyph;
+- `contextMenu.icon` + a session context-menu action that opens the page on the
+  session's workspace.
 
-1. Клиент вызывает `skillStudio.list(projectRoot)`.
-2. Host: `ctx.skills.list({ cwd: projectRoot })`.
-3. Ответ: массив summary + суммарный вес + флаг «каталог неполный» (провайдер не ответил).
+The page keeps a small state machine per surface: skills snapshot, catalog,
+archive, versions, compare, editor, preview and conflict dialogs. Everything is
+rendered with `React.createElement` and inline styles on DSH alias tokens, so it
+follows the host theme.
 
-### Создание
+## Storage
 
-1. Валидация на клиенте (быстрая) и на хосте (окончательная).
-2. Проверка: имя kebab-case, нет записи с таким именем в целевом слое.
-3. Запись `<root>/<имя>/SKILL.md` через `ctx.fs.writeText` с политикой песочницы.
-4. Watcher инвалидирует провайдер → следующий `list` видит файл.
+| What | Where |
+|---|---|
+| Skills | `<root>/skills/<name>/SKILL.md` |
+| Versions | `<project>/.dsh/skill-versions/<skill>/<label>/SKILL.md` |
+| Archive | `~/.dsh/skill-archive/<id>/{meta.json,skill/}` |
+| Custom categories | `<project>/.dsh/skill-categories.json` |
+| Recent paths | browser `localStorage` (`create-skills:recent-paths`) |
 
-### Установка из каталога
+## Data flow examples
 
-1. `catalog()` отдаёт записи + признак «уже установлен».
-2. `install(ids, root)`: для каждой записи — `GET https://codeload.github.com/<repo>/tar.gz/<ref>`, распаковать только `<path>/`, проверить `SKILL.md` и frontmatter, скопировать в `<root>/<имя>/`.
-3. Никакие скрипты из архива не выполняются; `scripts/`, `references/`, `assets/` копируются как данные.
-4. Отчёт: установлено/пропущено/ошибки; обновлённый бюджет.
+**Install from the catalog.** Client → `POST /install` with ids and scope →
+host downloads a repository tarball over HTTPS, validates `SKILL.md`, copies the
+skill directory (preserving symlinks and executable bits on POSIX) into the
+target root, and the client reloads the list.
 
-### Бюджет
+**Improve.** Client sends `{name | catalogId, task, instruction}` → host reads the
+body (from the skill file or the upstream `SKILL.md`), calls the model, stores
+the result as an `ai-<timestamp>` version with a complete frontmatter, and the
+client puts that version on side B of the comparison.
 
-`weight(skill) = ceil((len(name) + len(description) + len(whenToUse ?? "")) / 4)`.
-`total = Σ weight + 200` (накладные расходы каталога). Оценка приблизительная; точный счётчик — `tokenMeter`, но он про сессию, поэтому для страницы достаточно эвристики. На странице подпись «оценка».
+**Replace on conflict.** Copy returns `409` when the target name exists; the
+client asks `POST /skills/conflict` for both bodies, shows a diff summary, and
+retries with `replace: true`, which first moves the local copy into the archive.
 
-## Транспорт host ↔ client
+## Limits
 
-Решение (ADR-006): **same-origin HTTP**, зарегистрированный точными маршрутами
-`ctx.webServer.register({ kind: 'exact', path: '/plugins/create-skills/api/skills' })`,
-и обычный `fetch()` из страницы.
-
-Почему не `ctx.remote`: он требует typert-схем и сборки типов, а плагин намеренно
-plain-JS без шага сборки. HTTP-маршрут проверен на живой сборке: `GET` отвечает
-JSON, страница получает тот же origin.
-
-Важное ограничение: путь `/plugins/<id>/...` уже занят раздачей клиентских
-бандлов. Поэтому API регистрируется **точным** маршрутом; `kind: 'prefix'` с
-корнем `/plugins/create-skills/` перехватывал бы бандл и ломал загрузку клиента.
-
-## Скоуп каталога
-
-`ctx.skills.snapshot({ cwd, scope })` принимает в `scope` сам объект `Agent` —
-именно так это делает `dsh-tool-skill`. Без `scope` видны только глобальные
-провайдеры (встроенные пакеты), без проектного `.dsh/skills`.
-
-Поэтому host-половина берёт последний живой корневой агент:
-`agents.roots()` → `workingDirectory.ensure(agent)` → `snapshot({ cwd, scope: agent })`.
-Если живых агентов нет, страница показывает глобальный слой и предлагает ввести путь.
-
-## Безопасность
-
-- Запись только в известные корни (`<project>/.dsh/skills`, `~/.dsh/skills`), без `..` и симлинков наружу.
-- Имя скилла — строгий kebab-case; путь строится из имени, а не из пользовательского ввода целиком.
-- Установка: проверять, что распакованный путь остаётся внутри временной папки; лимит размера архива.
-- В каталоге показывать источник и лицензию; «установить» — всегда действие пользователя.
-- Плагин не выполняет команды из скиллов; исполнение — только через обычные инструменты агента и с его разрешениями.
-
-## Совместимость
-
-- `engines.dsh` — по фактической версии Desktop; `dsh.client.inject` — только для порядка активации.
-- Стили — только `--dsw-alias-*` токены; никаких импортов клиентских пакетов DSH.
-- Страница не должна падать при отсутствии `ctx.skills` (профиль без реестра) — показывать пустое состояние.
+- Built-in `skill-office` skills are provider-owned and cannot be removed
+  individually.
+- Comparison reads one workspace at a time.
+- No background jobs: all work happens inside a request, the archive and
+  versions are ordinary folders on disk.

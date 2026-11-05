@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in the Skills page does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please fill in the environment first — most
+        issues depend on the DSH version and the skill roots.
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version
+      description: Settings → About, or the version in the window title.
+      placeholder: 0.2.1-rc.5
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: 0.1.0
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Skills → Catalog
+        2. Click "Install" on docx
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Exact error text or notice, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        If the page is open, the plugin keeps recent client events at
+        `http://127.0.0.1:<port>/plugins/create-skills/api/stats` — paste the
+        `events` array. Remove personal paths if needed.
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: DSH was restarted after installing or updating the plugin
+          required: true
+        - label: The issue is not about a built-in `office*` skill (those ship with DSH)
