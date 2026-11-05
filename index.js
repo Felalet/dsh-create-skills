@@ -746,7 +746,7 @@ async function readVariant(ctx, view, spec) {
   return { name: spec.name, label: null, raw: definition.content, body: splitFrontmatter(definition.content).body };
 }
 
-function buildComparePrompt(left, right, task) {
+function buildComparePrompt(left, right, task, language) {
   const clip = (text) => (text.length > 9000 ? `${text.slice(0, 9000)}\n…(обрезано)` : text);
   const goal = task === '' ? 'общая пригодность скилла для работы с проектом' : task;
   return [
@@ -762,7 +762,7 @@ function buildComparePrompt(left, right, task) {
     'Сравни их по критериям: следование задаче, конкретность и полнота инструкций, риск ошибок, краткость.',
     'Ответь строго одним JSON-объектом без markdown и без пояснений:',
     '{"left":"2-4 предложения: что лучше и что хуже в A","right":"2-4 предложения: что лучше и что хуже в B","winner":"left|right|tie"}',
-    'Пиши по-русски.',
+    `Пиши на языке: ${language}.`,
   ].join('\n');
 }
 
@@ -838,7 +838,8 @@ async function compareVariants(ctx, view, body, res) {
   const left = await readVariant(ctx, view, body.left);
   const right = await readVariant(ctx, view, body.right);
   const task = typeof body.task === 'string' ? body.task.trim() : '';
-  const verdict = await judgeVariants(ctx, buildComparePrompt(left, right, task));
+  const language = body.lang === 'ru' ? 'Russian' : 'English';
+  const verdict = await judgeVariants(ctx, buildComparePrompt(left, right, task, language));
   sendJson(res, 200, {
     left: { name: left.name, label: left.label, body: left.body },
     right: { name: right.name, label: right.label, body: right.body },
@@ -954,6 +955,7 @@ async function suggestCategory(ctx, view, body, res) {
     .map((category) => `${category.id} — ${category.title}`)
     .join('\n');
   const content = typeof body.content === 'string' ? body.content.slice(0, 3000) : '';
+  const language = body.lang === 'ru' ? 'Russian' : 'English';
   const prompt = [
     'Выбери категорию для скилла или предложи новую короткую категорию.',
     'Существующие категории (id — название):',
@@ -963,6 +965,7 @@ async function suggestCategory(ctx, view, body, res) {
     `Описание: ${description}`,
     content ? `Инструкции:\n${content}` : '',
     '',
+    `Название новой категории — на языке: ${language}.`,
     'Верни строго JSON: {"id":"существующий id"} или {"title":"Название новой категории"}.',
   ].join('\n');
   const text = await streamModel(ctx, 'Ты — аккуратный классификатор скиллов. Отвечай только JSON.', prompt, 300);
@@ -990,10 +993,12 @@ async function groupByTask(ctx, view, body, res) {
     return;
   }
   const list = skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n');
+  const language = body.lang === 'ru' ? 'Russian' : 'English';
   const prompt = [
     `Задача: ${task}`,
     'Ниже список скиллов. Сгруппируй их под эту задачу в 3–6 групп так, чтобы было понятно, что применять на каждом шаге.',
     'Не меняй сами категории скиллов — только назови группы и распредели имена.',
+    `Названия групп — на языке: ${language}.`,
     '',
     list,
     '',

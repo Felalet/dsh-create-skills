@@ -97,11 +97,17 @@ window.__ModuleLoader__.load({
       allCategories: 'Все категории',
       catBuiltin: 'Встроенные',
       catMine: 'Мои скиллы',
+      catDocuments: 'Документы',
+      catDevelopment: 'Разработка',
+      catDesign: 'Дизайн',
+      catMeta: 'Мета',
       verdictWinner: 'Лучше по оценке',
       chooseAndDisable: 'Выбрать этот скилл и выключить второй',
       otherReadOnly: 'Второй скилл встроенный — выключить его нельзя',
       diffTitle: 'Различия',
       sameText: 'Тексты совпадают',
+      diffTooBig: '…текст слишком большой для построчного сравнения…',
+      newSkillTemplate: '# Новый скилл\n\n',
       backupSaved: 'бэкап',
       currentVersion: 'текущая',
       chosen: 'Выбрано',
@@ -201,11 +207,17 @@ window.__ModuleLoader__.load({
       allCategories: 'All categories',
       catBuiltin: 'Bundled',
       catMine: 'My skills',
+      catDocuments: 'Documents',
+      catDevelopment: 'Development',
+      catDesign: 'Design',
+      catMeta: 'Meta',
       verdictWinner: 'AI verdict',
       chooseAndDisable: 'Choose this skill and disable the other',
       otherReadOnly: 'The other skill is bundled and cannot be disabled',
       diffTitle: 'Differences',
       sameText: 'Texts are identical',
+      diffTooBig: '…text is too large for a line diff…',
+      newSkillTemplate: '# New skill\n\n',
       backupSaved: 'backup',
       currentVersion: 'current',
       chosen: 'Chosen',
@@ -371,6 +383,11 @@ window.__ModuleLoader__.load({
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    function uiLang() {
+      const lang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
+      return String(lang).toLowerCase().startsWith('ru') ? 'ru' : 'en';
+    }
+
     async function api(path, options) {
       const response = await fetch(API + path, options);
       const body = await response.json().catch(() => ({}));
@@ -384,7 +401,7 @@ window.__ModuleLoader__.load({
       const a = leftText.split('\n');
       const b = rightText.split('\n');
       if (a.length > 800 || b.length > 800) {
-        return [{ type: 'gap', text: '…текст слишком большой для построчного сравнения…' }];
+        return [{ type: 'limit', text: '' }];
       }
       const n = a.length;
       const m = b.length;
@@ -465,8 +482,15 @@ window.__ModuleLoader__.load({
 
     function categoryLabel(t, id, categories) {
       if (!id) return '';
-      if (id === 'builtin') return t('catBuiltin');
-      if (id === 'mine') return t('catMine');
+      const known = {
+        builtin: 'catBuiltin',
+        mine: 'catMine',
+        documents: 'catDocuments',
+        development: 'catDevelopment',
+        design: 'catDesign',
+        meta: 'catMeta',
+      };
+      if (known[id]) return t(known[id]);
       const found = (categories || []).find((category) => category.id === id);
       return found ? found.title : id;
     }
@@ -496,8 +520,19 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function makePage(t) {
+    function makePage(t, ctx) {
+      // Re-render the page when the app locale changes: t() reads the current
+      // locale on every call, but nothing would otherwise schedule a render.
+      function useLocaleTick() {
+        const [, setTick] = React.useState(0);
+        React.useEffect(() => {
+          if (!ctx.locale || typeof ctx.locale.subscribe !== 'function') return undefined;
+          return ctx.locale.subscribe(() => setTick((value) => value + 1));
+        }, []);
+      }
+
       return function SkillsPage() {
+        useLocaleTick();
         const [tab, setTab] = React.useState('installed');
         const [skillsState, setSkillsState] = React.useState({ status: 'loading' });
         const [catalogState, setCatalogState] = React.useState({ status: 'idle' });
@@ -584,7 +619,7 @@ window.__ModuleLoader__.load({
             name: '',
             description: '',
             whenToUse: '',
-            content: '# Новый скилл\n\n',
+            content: t('newSkillTemplate'),
             error: null,
             busy: false,
           });
@@ -825,6 +860,7 @@ window.__ModuleLoader__.load({
                 left: { name: left.skill, label: left.label || undefined },
                 right: { name: right.skill, label: right.label || undefined },
                 task: compare.task,
+                lang: uiLang(),
               }),
             });
             setCompare((current) => Object.assign({}, current, { busy: false, result: body }));
@@ -947,7 +983,7 @@ window.__ModuleLoader__.load({
             const suggestion = await api('/suggest-category', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ name: editor.name, description: editor.description, content: editor.content }),
+              body: JSON.stringify({ name: editor.name, description: editor.description, content: editor.content, lang: uiLang() }),
             });
             if (suggestion.categoryId) {
               setEditor((current) => (current ? Object.assign({}, current, { category: suggestion.categoryId }) : current));
@@ -970,7 +1006,7 @@ window.__ModuleLoader__.load({
             const body = await api('/group', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ task: groupTask.trim() }),
+              body: JSON.stringify({ task: groupTask.trim(), lang: uiLang() }),
             });
             setGroups(Array.isArray(body.groups) ? body.groups : []);
           } catch (error) {
@@ -1006,11 +1042,7 @@ window.__ModuleLoader__.load({
                   h(
                     'option',
                     { key: category.id, value: category.id },
-                    category.id === 'builtin'
-                      ? t('catBuiltin')
-                      : category.id === 'mine'
-                        ? t('catMine')
-                        : category.title,
+                    categoryLabel(t, category.id, categories),
                   ),
                 ),
               ),
@@ -1153,7 +1185,9 @@ window.__ModuleLoader__.load({
                                         : 'var(--dsw-alias-label-secondary)',
                                 },
                               },
-                              `${line.type === 'remove' ? '-' : line.type === 'add' ? '+' : ' '} ${line.text}`,
+                              line.type === 'limit'
+                                ? t('diffTooBig')
+                                : `${line.type === 'remove' ? '-' : line.type === 'add' ? '+' : ' '} ${line.text}`,
                             ),
                           ),
                         ),
@@ -1779,8 +1813,22 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { ru: RU, en: EN }), 'create-skills: dictionaries');
-        const t = ctx.locale.bind(NS);
-        const Page = makePage(t);
+
+        // Rebind the translator on every locale change: `tr` keeps calling the
+        // current binding, and the page subscribes below to re-render.
+        let bound = ctx.locale.bind(NS);
+        ctx.effect(
+          () =>
+            typeof ctx.locale.subscribe === 'function'
+              ? ctx.locale.subscribe(() => {
+                  bound = ctx.locale.bind(NS);
+                })
+              : undefined,
+          'create-skills: locale rebind',
+        );
+        const tr = (key) => bound(key);
+
+        const Page = makePage(tr, ctx);
         function GuardedPage() {
           return h(Boundary, null, h(Page));
         }
@@ -1790,7 +1838,7 @@ window.__ModuleLoader__.load({
         );
         ctx.slots.inject('sidebar.panellist', () =>
           ctx.slots.register(
-            { name: 'sidebar.panellist', id: 'create-skills', order: 30, label: () => t('title'), locale: NS },
+            { name: 'sidebar.panellist', id: 'create-skills', order: 30, label: () => tr('title'), locale: NS },
             PanelIcon,
           ),
         );
