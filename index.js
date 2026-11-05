@@ -947,6 +947,40 @@ async function pickFolder(ctx, res) {
   sendJson(res, 200, { path: typeof chosen === 'string' ? chosen : null });
 }
 
+// Copies every project skill of every other workspace into the current one,
+// skipping names that already exist here.
+async function collectSkills(ctx, view, res) {
+  const projectRoot = await findProjectRoot(view.cwd);
+  const targetRoot = join(projectRoot, '.dsh', 'skills');
+  assertInside(targetRoot, allowedRoots(projectRoot));
+  await mkdir(targetRoot, { recursive: true });
+  const copied = [];
+  const skipped = [];
+  for (const workspace of await readWorkspaces()) {
+    if (resolve(workspace.path) === resolve(projectRoot)) continue;
+    const sourceRoot = join(workspace.path, '.dsh', 'skills');
+    let entries = [];
+    try {
+      entries = await readdir(sourceRoot, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !KEBAB.test(entry.name)) continue;
+      const source = join(sourceRoot, entry.name);
+      if (!(await exists(join(source, 'SKILL.md')))) continue;
+      const target = join(targetRoot, entry.name);
+      if (await exists(target)) {
+        skipped.push({ name: entry.name, from: workspace.title, reason: 'already exists' });
+        continue;
+      }
+      await cp(source, target, { recursive: true });
+      copied.push({ name: entry.name, from: workspace.title });
+    }
+  }
+  sendJson(res, 200, { ok: true, copied, skipped });
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1634,6 +1668,23 @@ export function apply(ctx) {
             return;
           }
           await listWorkspaceSkills(ctx, res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/skills/collect`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await collectSkills(ctx, view, res);
         } catch (error) {
           errorResponse(res, error);
         }

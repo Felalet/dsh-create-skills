@@ -79,6 +79,10 @@ window.__ModuleLoader__.load({
       openWorkspace: 'Открыть',
       copyHere: 'Скопировать сюда',
       copiedHere: 'Скопировано',
+      collectAll: 'Собрать со всех',
+      collectDone: 'Собрано',
+      skipped: 'пропущено',
+      confirmCollect: 'Собрать скиллы со всех рабочих областей в текущую?',
       name: 'Имя (kebab-case)',
       description: 'Описание (одна строка, до 200 символов)',
       descriptionPlaceholder: 'Что делает и когда применять — по этой строке модель выбирает скилл',
@@ -238,6 +242,10 @@ window.__ModuleLoader__.load({
       openWorkspace: 'Open',
       copyHere: 'Copy here',
       copiedHere: 'Copied',
+      collectAll: 'Collect from all',
+      collectDone: 'Collected',
+      skipped: 'skipped',
+      confirmCollect: 'Collect skills from every workspace into this one?',
       name: 'Name (kebab-case)',
       description: 'Description (one line, up to 200 chars)',
       descriptionPlaceholder: 'What it does and when to use it — the model picks skills by this line',
@@ -397,6 +405,10 @@ window.__ModuleLoader__.load({
       openWorkspace: '打开',
       copyHere: '复制到这里',
       copiedHere: '已复制',
+      collectAll: '全部收集',
+      collectDone: '已收集',
+      skipped: '已跳过',
+      confirmCollect: '将所有工作区的技能收集到当前工作区？',
       name: '名称（kebab-case）',
       description: '描述（一行，最多 200 字符）',
       descriptionPlaceholder: '做什么、何时使用——模型依据这一行选择技能',
@@ -1337,6 +1349,31 @@ window.__ModuleLoader__.load({
             setNotice({ kind: 'ok', text: `${t('copiedHere')}: ${skill.name}` });
             await loadSkills(target || undefined, true);
             await loadCatalog(target || undefined);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setBusy(null);
+          }
+        };
+
+        const collectAll = async () => {
+          if (!window.confirm(t('confirmCollect'))) return;
+          const target = pathDraft.trim();
+          setBusy('collect');
+          try {
+            const body = await api(`/skills/collect${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: '{}',
+            });
+            setNotice({
+              kind: 'ok',
+              text: `${t('collectDone')}: ${body.copied.length} · ${t('skipped')}: ${body.skipped.length}`,
+            });
+            await loadSkills(target || undefined, true);
+            await loadCatalog(target || undefined);
+            const refreshed = await api('/workspace-skills').catch(() => null);
+            if (refreshed && Array.isArray(refreshed.workspaces)) setWorkspaceSkills(refreshed.workspaces);
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
           } finally {
@@ -2696,7 +2733,27 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   null,
-                  h('div', { style: styles.sectionTitle }, t('otherWorkspaces')),
+                  h(
+                    'div',
+                    {
+                      style: {
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                      },
+                    },
+                    h('div', { style: styles.sectionTitle }, t('otherWorkspaces')),
+                    h(
+                      'button',
+                      {
+                        style: Object.assign({}, styles.button, styles.small),
+                        disabled: busy === 'collect',
+                        onClick: collectAll,
+                      },
+                      t('collectAll'),
+                    ),
+                  ),
                   otherWorkspaces.map((workspace) =>
                     h(
                       'div',
