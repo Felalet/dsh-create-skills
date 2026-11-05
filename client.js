@@ -90,6 +90,7 @@ window.__ModuleLoader__.load({
         'Созданные вручную скиллы появляются во вкладке «Установленные», а не в каталоге.',
       installScope: 'Установить',
       previewSource: 'Источник',
+      preview: 'Просмотр',
       tabCompare: 'Сравнение',
       tabArchive: 'Архив',
       archiveEmpty: 'Архив пуст',
@@ -238,6 +239,7 @@ window.__ModuleLoader__.load({
         'Skills created by hand appear in the Installed tab, not in the catalog.',
       installScope: 'Install to',
       previewSource: 'Source',
+      preview: 'Preview',
       tabCompare: 'Compare',
       tabArchive: 'Archive',
       archiveEmpty: 'The archive is empty',
@@ -385,6 +387,7 @@ window.__ModuleLoader__.load({
       catalogCreatedHint: '手动创建的技能会出现在「已安装」标签页，而不是技能库。',
       installScope: '安装到',
       previewSource: '来源',
+      preview: '预览',
       tabCompare: '对比',
       tabArchive: '回收站',
       archiveEmpty: '回收站为空',
@@ -490,6 +493,10 @@ window.__ModuleLoader__.load({
         borderRadius: 8,
         outline: 'none',
         resize: 'vertical',
+        // Keep text selection inside the field: the host shell disables
+        // selection globally, and a wrapping label made drags bleed out.
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
       },
       select: {
         padding: '7px 10px',
@@ -640,6 +647,8 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-base)',
         border: '1px solid var(--dsw-alias-border-l1)',
         borderRadius: 8,
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
       },
     };
 
@@ -853,6 +862,8 @@ window.__ModuleLoader__.load({
         // A window.prompt would be the obvious control here, but the DSH Web client
         // runs in Electron, where prompt() is unavailable and the click would do nothing.
         const [categoryDraft, setCategoryDraft] = React.useState(null);
+        // Body of the last picked compare side, shown before a comparison runs.
+        const [sidePreview, setSidePreview] = React.useState(null);
         // Catalog preview: fetched on demand, so installing is a separate decision.
         const [preview, setPreview] = React.useState(null);
         // The editor and the versions panel render above the list; bumping this
@@ -1316,8 +1327,42 @@ window.__ModuleLoader__.load({
             }
             return next;
           });
-          if (patch.skill !== undefined && patch.skill !== '' && !patch.catalogId) {
-            loadCompareVersions(side, patch.skill);
+          if (patch.skill !== undefined) {
+            loadSidePreview(side, patch);
+            if (patch.skill !== '' && !patch.catalogId) loadCompareVersions(side, patch.skill);
+          }
+        };
+
+        const stripFrontmatter = (text) => {
+          const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text);
+          return match ? text.slice(match[0].length) : text;
+        };
+
+        // Picking a side immediately shows its instructions, so the choice can
+        // be read before the comparison (and without running the model).
+        const loadSidePreview = async (side, spec) => {
+          if (!spec || !spec.skill) {
+            setSidePreview(null);
+            return;
+          }
+          setSidePreview({ side, name: spec.skill, status: 'loading', content: '', error: null });
+          try {
+            const body = spec.catalogId
+              ? await api(`/preview?id=${encodeURIComponent(spec.catalogId)}`)
+              : await api(`/skills?name=${encodeURIComponent(spec.skill)}`);
+            const content = spec.catalogId ? stripFrontmatter(body.content ?? '') : body.content ?? '';
+            setSidePreview((current) =>
+              current && current.side === side && current.name === spec.skill
+                ? { side, name: spec.skill, status: 'ready', content }
+                : current,
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setSidePreview((current) =>
+              current && current.side === side && current.name === spec.skill
+                ? { side, name: spec.skill, status: 'error', content: '', error: message }
+                : current,
+            );
           }
         };
 
@@ -1730,6 +1775,18 @@ window.__ModuleLoader__.load({
               sideCard('left', 'A'),
               sideCard('right', 'B'),
             ),
+            !compare.result && sidePreview
+              ? h(
+                  'div',
+                  { style: styles.form },
+                  h('div', { style: styles.name }, `${t('preview')}: ${sidePreview.name}`),
+                  sidePreview.status === 'loading'
+                    ? h('div', { style: styles.note }, t('loading'))
+                    : sidePreview.status === 'error'
+                      ? h('div', { style: styles.error }, sidePreview.error)
+                      : h('pre', { style: styles.pre }, sidePreview.content),
+                )
+              : null,
             h('div', { style: styles.note }, t('compareCatalogHint')),
             h(
               'label',
@@ -1961,7 +2018,7 @@ window.__ModuleLoader__.load({
               }),
             ),
             h(
-              'label',
+              'div',
               { style: styles.field },
               h('span', { style: styles.fieldLabel }, t('content')),
               h('textarea', {

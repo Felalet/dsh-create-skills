@@ -922,6 +922,12 @@ async function applyVersion(ctx, view, body, res) {
   if (!(await exists(file))) throw new HttpError(404, `version "${label}" not found`);
   assertInside(found.path, allowedRoots(projectRoot));
   const raw = await readFile(file, 'utf8');
+  // A version without name/description would make the registry drop the skill
+  // as soon as it is applied, so reject it before anything is overwritten.
+  const parsedVersion = splitFrontmatter(raw);
+  if (!parsedVersion.fields.name || !parsedVersion.fields.description) {
+    throw new HttpError(422, `version "${label}" has no name/description in its frontmatter`);
+  }
   const current = await readFile(found.path, 'utf8');
 
   // Never lose the state we are about to overwrite: snapshot it as an
@@ -988,7 +994,23 @@ async function readVariant(ctx, view, spec) {
   if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
   const definition = await skills.get(spec.name, { cwd: view.cwd, scope: view.scope });
   if (!definition) throw new HttpError(404, `skill "${spec.name}" not found`);
-  return { name: spec.name, label: null, raw: definition.content, body: splitFrontmatter(definition.content).body };
+  // The registry may hand back the body only; the file keeps the frontmatter,
+  // and an improved version must be written with a complete one.
+  let raw = typeof definition.content === 'string' ? definition.content : '';
+  if (typeof definition.path === 'string') {
+    try {
+      raw = await readFile(definition.path, 'utf8');
+    } catch {
+      // keep the registry copy when the file is unreadable
+    }
+  }
+  return {
+    name: spec.name,
+    label: null,
+    raw,
+    body: splitFrontmatter(raw).body,
+    description: typeof definition.description === 'string' ? definition.description : '',
+  };
 }
 
 // The UI sends the active locale id; the model needs a language name.
@@ -1139,10 +1161,18 @@ async function improveSkill(ctx, view, body, res) {
 
   const projectRoot = await findProjectRoot(view.cwd);
   const label = `ai-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+  // Keep the version loadable: when the source copy carried no frontmatter
+  // fields, restore name/description from the registry definition.
+  let frontmatter = parsed.frontmatter;
+  if (!/^\s*name\s*:/m.test(frontmatter)) frontmatter = `name: ${original.name}\n${frontmatter}`;
+  if (!/^\s*description\s*:/m.test(frontmatter)) {
+    const fallback = (original.description || original.name).slice(0, 200);
+    frontmatter = `${frontmatter}\ndescription: ${JSON.stringify(fallback)}`;
+  }
   const dir = join(versionsDir(projectRoot, original.name), label);
   assertInside(dir, [join(projectRoot, '.dsh')]);
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, 'SKILL.md'), `---\n${parsed.frontmatter}\n---\n\n${improvedBody}\n`, 'utf8');
+  await writeFile(join(dir, 'SKILL.md'), `---\n${frontmatter}\n---\n\n${improvedBody}\n`, 'utf8');
 
   sendJson(res, 200, {
     skill: original.name,
