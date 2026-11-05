@@ -859,21 +859,76 @@ async function previewCatalogEntry(url, res) {
   });
 }
 
-async function listWorkspaces(res) {
-  // The app keeps its workspace registry in the DSH storage unit; the plugin
-  // only reads it to offer an explicit target workspace.
+async function readWorkspaces() {
   const file = join(dshHome(), 'storages', 'workspace.json');
   try {
     const parsed = JSON.parse(await readFile(file, 'utf8'));
     const table = parsed && parsed.tables && parsed.tables.workspaces ? parsed.tables.workspaces : {};
-    const workspaces = Object.values(table)
+    return Object.values(table)
       .filter((entry) => entry && typeof entry.path === 'string')
       .map((entry) => ({ path: entry.path, title: entry.title ?? entry.path }))
       .sort((a, b) => a.title.localeCompare(b.title));
-    sendJson(res, 200, { workspaces });
   } catch {
-    sendJson(res, 200, { workspaces: [] });
+    return [];
   }
+}
+
+async function listWorkspaces(res) {
+  sendJson(res, 200, { workspaces: await readWorkspaces() });
+}
+
+// Skills of every registered workspace, so a skill in one workspace can be
+// found and carried into another.
+async function listWorkspaceSkills(ctx, res) {
+  const skills = ctx.get('skills');
+  if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
+  const result = [];
+  for (const workspace of await readWorkspaces()) {
+    const rows = [];
+    try {
+      const snapshot = await skills.snapshot({ cwd: workspace.path });
+      for (const skill of snapshot.skills) {
+        if (typeof skill.path !== 'string' || !isInsidePath(skill.path, workspace.path)) continue;
+        let category = '';
+        try {
+          category = parseCategory(splitFrontmatter(await readFile(skill.path, 'utf8')).frontmatter);
+        } catch {
+          // a skill without a readable file still lists
+        }
+        rows.push({
+          name: skill.name,
+          description: skill.description ?? '',
+          category,
+          enabled: skill.invocation?.modelInvocable !== false,
+        });
+      }
+    } catch {
+      // an unreachable workspace is listed without skills
+    }
+    result.push({ path: workspace.path, title: workspace.title, skills: rows });
+  }
+  sendJson(res, 200, { workspaces: result });
+}
+
+async function copySkillToWorkspace(ctx, view, body, res) {
+  const name = typeof body.name === 'string' ? body.name : '';
+  validateName(name);
+  const from = typeof body.from === 'string' ? resolve(body.from) : '';
+  const workspaces = await readWorkspaces();
+  if (!workspaces.some((workspace) => resolve(workspace.path) === from)) {
+    throw new HttpError(400, 'unknown source workspace');
+  }
+  const source = join(from, '.dsh', 'skills', name);
+  if (!(await exists(join(source, 'SKILL.md')))) {
+    throw new HttpError(404, `skill "${name}" not found in the source workspace`);
+  }
+  const projectRoot = await findProjectRoot(view.cwd);
+  const targetRoot = join(projectRoot, '.dsh', 'skills');
+  assertInside(targetRoot, allowedRoots(projectRoot));
+  const target = join(targetRoot, name);
+  if (await exists(target)) throw new HttpError(409, `skill "${name}" already exists in this workspace`);
+  await cp(source, target, { recursive: true });
+  sendJson(res, 201, { ok: true, path: target });
 }
 
 function safeLabel(label) {
@@ -1533,6 +1588,38 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await groupByTask(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/workspace-skills`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await listWorkspaceSkills(ctx, res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/skills/copy`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await copySkillToWorkspace(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }

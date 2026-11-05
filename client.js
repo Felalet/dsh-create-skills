@@ -72,6 +72,10 @@ window.__ModuleLoader__.load({
       scopeProjectHint: 'Скилл будет доступен только в этом проекте',
       scopeUserHint: 'Скилл будет доступен во всех проектах',
       workspace: 'Рабочая область',
+      otherWorkspaces: 'Другие рабочие области',
+      openWorkspace: 'Открыть',
+      copyHere: 'Скопировать сюда',
+      copiedHere: 'Скопировано',
       name: 'Имя (kebab-case)',
       description: 'Описание (одна строка, до 200 символов)',
       descriptionPlaceholder: 'Что делает и когда применять — по этой строке модель выбирает скилл',
@@ -224,6 +228,10 @@ window.__ModuleLoader__.load({
       scopeProjectHint: 'The skill will be available only in this project',
       scopeUserHint: 'The skill will be available in every project',
       workspace: 'Workspace',
+      otherWorkspaces: 'Other workspaces',
+      openWorkspace: 'Open',
+      copyHere: 'Copy here',
+      copiedHere: 'Copied',
       name: 'Name (kebab-case)',
       description: 'Description (one line, up to 200 chars)',
       descriptionPlaceholder: 'What it does and when to use it — the model picks skills by this line',
@@ -376,6 +384,10 @@ window.__ModuleLoader__.load({
       scopeProjectHint: '技能仅在当前项目中可用',
       scopeUserHint: '技能将在所有项目中可用',
       workspace: '工作区',
+      otherWorkspaces: '其他工作区',
+      openWorkspace: '打开',
+      copyHere: '复制到这里',
+      copiedHere: '已复制',
       name: '名称（kebab-case）',
       description: '描述（一行，最多 200 字符）',
       descriptionPlaceholder: '做什么、何时使用——模型依据这一行选择技能',
@@ -844,6 +856,7 @@ window.__ModuleLoader__.load({
         const [catalogState, setCatalogState] = React.useState({ status: 'idle' });
         const [archiveState, setArchiveState] = React.useState({ status: 'idle', entries: [] });
         const [workspaces, setWorkspaces] = React.useState([]);
+        const [workspaceSkills, setWorkspaceSkills] = React.useState([]);
         const [pathDraft, setPathDraft] = React.useState('');
         const [editor, setEditor] = React.useState(null);
         const [busy, setBusy] = React.useState(null);
@@ -971,6 +984,13 @@ window.__ModuleLoader__.load({
             .then((body) => setWorkspaces(Array.isArray(body.workspaces) ? body.workspaces : []))
             .catch(() => {});
         }, []);
+
+        React.useEffect(() => {
+          if (tab !== 'catalog') return;
+          api('/workspace-skills')
+            .then((body) => setWorkspaceSkills(Array.isArray(body.workspaces) ? body.workspaces : []))
+            .catch(() => {});
+        }, [tab]);
 
         React.useEffect(() => {
           if (!notice) return undefined;
@@ -1221,6 +1241,32 @@ window.__ModuleLoader__.load({
             await loadArchive();
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          }
+        };
+
+        const openWorkspace = async (workspace) => {
+          setPathDraft(workspace.path);
+          await loadSkills(workspace.path, true);
+          await loadCatalog(workspace.path);
+          setNotice({ kind: 'ok', text: `${t('loaded')}: ${workspace.title}` });
+        };
+
+        const copyHere = async (workspace, skill) => {
+          const target = pathDraft.trim();
+          setBusy(`copy:${skill.name}`);
+          try {
+            await api(`/skills/copy${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name: skill.name, from: workspace.path }),
+            });
+            setNotice({ kind: 'ok', text: `${t('copiedHere')}: ${skill.name}` });
+            await loadSkills(target || undefined, true);
+            await loadCatalog(target || undefined);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setBusy(null);
           }
         };
 
@@ -2494,6 +2540,9 @@ window.__ModuleLoader__.load({
           const ownSkills = (data ? data.skills : []).filter(
             (skill) => skill.writable && !catalogNames.has(skill.name),
           );
+          const otherWorkspaces = workspaceSkills.filter(
+            (workspace) => workspace.path !== pathDraft && workspace.skills.length > 0,
+          );
 
           return h(
             'div',
@@ -2562,6 +2611,76 @@ window.__ModuleLoader__.load({
                               onClick: () => removeSkill(skill),
                             },
                             t('delete'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              : null,
+            otherWorkspaces.length > 0
+              ? h(
+                  'div',
+                  null,
+                  h('div', { style: styles.sectionTitle }, t('otherWorkspaces')),
+                  otherWorkspaces.map((workspace) =>
+                    h(
+                      'div',
+                      { key: workspace.path, style: styles.form },
+                      h(
+                        'div',
+                        {
+                          style: {
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            alignItems: 'center',
+                          },
+                        },
+                        h(
+                          'div',
+                          { style: { minWidth: 0 } },
+                          h('div', { style: styles.name }, workspace.title),
+                          h('div', { style: Object.assign({}, styles.note, styles.mono) }, workspace.path),
+                        ),
+                        h(
+                          'button',
+                          {
+                            style: Object.assign({}, styles.button, styles.small),
+                            onClick: () => openWorkspace(workspace),
+                          },
+                          t('openWorkspace'),
+                        ),
+                      ),
+                      h(
+                        'div',
+                        { style: styles.list },
+                        workspace.skills.map((skill) =>
+                          h(
+                            'div',
+                            { key: skill.name, style: styles.row },
+                            h(
+                              'div',
+                              { style: styles.rowMain },
+                              h('div', { style: styles.name }, skill.name),
+                              h('div', { style: styles.description }, skill.description),
+                            ),
+                            h(
+                              'div',
+                              { style: styles.rowSide },
+                              skill.enabled
+                                ? null
+                                : h('span', { style: Object.assign({}, styles.badge, styles.warn) }, t('modelOff')),
+                              h(
+                                'button',
+                                {
+                                  style: Object.assign({}, styles.button, styles.small, styles.primary),
+                                  disabled: busy === `copy:${skill.name}`,
+                                  onClick: () => copyHere(workspace, skill),
+                                },
+                                t('copyHere'),
+                              ),
+                            ),
                           ),
                         ),
                       ),
