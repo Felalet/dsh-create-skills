@@ -859,6 +859,23 @@ async function previewCatalogEntry(url, res) {
   });
 }
 
+async function listWorkspaces(res) {
+  // The app keeps its workspace registry in the DSH storage unit; the plugin
+  // only reads it to offer an explicit target workspace.
+  const file = join(dshHome(), 'storages', 'workspace.json');
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'));
+    const table = parsed && parsed.tables && parsed.tables.workspaces ? parsed.tables.workspaces : {};
+    const workspaces = Object.values(table)
+      .filter((entry) => entry && typeof entry.path === 'string')
+      .map((entry) => ({ path: entry.path, title: entry.title ?? entry.path }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    sendJson(res, 200, { workspaces });
+  } catch {
+    sendJson(res, 200, { workspaces: [] });
+  }
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1516,6 +1533,21 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await groupByTask(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/workspaces`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await listWorkspaces(res);
         } catch (error) {
           errorResponse(res, error);
         }

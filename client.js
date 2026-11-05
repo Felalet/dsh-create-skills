@@ -71,6 +71,7 @@ window.__ModuleLoader__.load({
       scopeUser: 'в пользовательские',
       scopeProjectHint: 'Скилл будет доступен только в этом проекте',
       scopeUserHint: 'Скилл будет доступен во всех проектах',
+      workspace: 'Рабочая область',
       name: 'Имя (kebab-case)',
       description: 'Описание (одна строка, до 200 символов)',
       descriptionPlaceholder: 'Что делает и когда применять — по этой строке модель выбирает скилл',
@@ -222,6 +223,7 @@ window.__ModuleLoader__.load({
       scopeUser: 'user',
       scopeProjectHint: 'The skill will be available only in this project',
       scopeUserHint: 'The skill will be available in every project',
+      workspace: 'Workspace',
       name: 'Name (kebab-case)',
       description: 'Description (one line, up to 200 chars)',
       descriptionPlaceholder: 'What it does and when to use it — the model picks skills by this line',
@@ -373,6 +375,7 @@ window.__ModuleLoader__.load({
       scopeUser: '用户目录',
       scopeProjectHint: '技能仅在当前项目中可用',
       scopeUserHint: '技能将在所有项目中可用',
+      workspace: '工作区',
       name: '名称（kebab-case）',
       description: '描述（一行，最多 200 字符）',
       descriptionPlaceholder: '做什么、何时使用——模型依据这一行选择技能',
@@ -840,6 +843,7 @@ window.__ModuleLoader__.load({
         const [skillsState, setSkillsState] = React.useState({ status: 'loading' });
         const [catalogState, setCatalogState] = React.useState({ status: 'idle' });
         const [archiveState, setArchiveState] = React.useState({ status: 'idle', entries: [] });
+        const [workspaces, setWorkspaces] = React.useState([]);
         const [pathDraft, setPathDraft] = React.useState('');
         const [editor, setEditor] = React.useState(null);
         const [busy, setBusy] = React.useState(null);
@@ -963,6 +967,12 @@ window.__ModuleLoader__.load({
         }, [tab, loadArchive]);
 
         React.useEffect(() => {
+          api('/workspaces')
+            .then((body) => setWorkspaces(Array.isArray(body.workspaces) ? body.workspaces : []))
+            .catch(() => {});
+        }, []);
+
+        React.useEffect(() => {
           if (!notice) return undefined;
           const timer = setTimeout(() => setNotice(null), 4000);
           return () => clearTimeout(timer);
@@ -1030,6 +1040,7 @@ window.__ModuleLoader__.load({
           setEditor({
             mode: 'create',
             scope: 'project',
+            workspace: '',
             category: '',
             name: '',
             description: '',
@@ -1084,9 +1095,10 @@ window.__ModuleLoader__.load({
             return;
           }
           setEditor((current) => ({ ...current, busy: true, error: null }));
+          const targetWorkspace = editor.mode === 'create' ? editor.workspace || pathDraft.trim() : '';
           try {
             if (editor.mode === 'create') {
-              await api('/skills', {
+              await api(`/skills${targetWorkspace ? `?cwd=${encodeURIComponent(targetWorkspace)}` : ''}`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ ...payload, scope: editor.scope }),
@@ -1105,7 +1117,8 @@ window.__ModuleLoader__.load({
             // A new skill lives in the installed list, not in the catalog, so
             // show the list where it can actually be seen right away.
             setTab('installed');
-            await refresh();
+            if (targetWorkspace) setPathDraft(targetWorkspace);
+            await loadSkills(targetWorkspace || pathDraft.trim() || undefined, true);
           } catch (error) {
             setEditor((current) => ({
               ...current,
@@ -1929,13 +1942,31 @@ window.__ModuleLoader__.load({
                   )
                 : null,
             ),
+            editor.mode === 'create' && editor.scope === 'project' && workspaces.length > 0
+              ? h(
+                  'label',
+                  { style: styles.field },
+                  h('span', { style: styles.fieldLabel }, t('workspace')),
+                  h(
+                    'select',
+                    {
+                      style: Object.assign({}, styles.select, { width: '100%' }),
+                      value: editor.workspace || pathDraft,
+                      onChange: (event) => setEditor({ ...editor, workspace: event.target.value }),
+                    },
+                    workspaces.map((workspace) =>
+                      h('option', { key: workspace.path, value: workspace.path }, workspace.title),
+                    ),
+                  ),
+                )
+              : null,
             editor.mode === 'create'
               ? h(
                   'div',
                   { style: styles.note },
                   editor.scope === 'user'
                     ? t('scopeUserHint')
-                    : `${t('scopeProjectHint')}: ${pathDraft}`,
+                    : `${t('scopeProjectHint')}: ${editor.workspace || pathDraft}`,
                 )
               : null,
             h(
