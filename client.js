@@ -1106,9 +1106,10 @@ window.__ModuleLoader__.load({
         };
 
         // Deleting a skill moves it to the archive; the archive owns the only
-        // permanent delete, so a misclick stays recoverable.
+        // permanent delete, so a misclick stays recoverable. The installed list
+        // only disables skills — deletion lives in the catalog and the editor.
         const removeSkill = async (skill) => {
-          if (!window.confirm(`${t('confirmArchive')}: ${skill.name}?`)) return;
+          if (!window.confirm(`${t('confirmArchive')}: ${skill.name}?`)) return false;
           setBusy(skill.name);
           try {
             await api(`/archive${cwdQuery()}`, {
@@ -1119,8 +1120,10 @@ window.__ModuleLoader__.load({
             setNotice({ kind: 'ok', text: `${t('archiveDone')}: ${skill.name}` });
             await refresh();
             await loadArchive();
+            return true;
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+            return false;
           } finally {
             setBusy(null);
           }
@@ -1951,6 +1954,20 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: styles.formActions },
+              editor.mode === 'edit'
+                ? h(
+                    'button',
+                    {
+                      style: Object.assign({}, styles.button, styles.small, styles.danger),
+                      disabled: editor.busy || busy === editor.name,
+                      onClick: async () => {
+                        const archived = await removeSkill({ name: editor.name });
+                        if (archived) setEditor(null);
+                      },
+                    },
+                    t('delete'),
+                  )
+                : null,
               h(
                 'button',
                 {
@@ -2243,15 +2260,6 @@ window.__ModuleLoader__.load({
                               onClick: () => toggleSkill(skill),
                             },
                             skill.modelInvocable ? t('disable') : t('enable'),
-                          ),
-                          h(
-                            'button',
-                            {
-                              style: Object.assign({}, styles.button, styles.small, styles.danger),
-                              disabled: busy === skill.name,
-                              onClick: () => removeSkill(skill),
-                            },
-                            t('delete'),
                           ),
                         )
                       : null,
