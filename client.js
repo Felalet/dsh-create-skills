@@ -40,6 +40,9 @@ window.__ModuleLoader__.load({
       saveVersion: 'Сохранить версию',
       versionLabel: 'Метка версии',
       noVersions: 'Версий пока нет',
+      pruneVersions: 'Оставить последнюю',
+      confirmPrune: 'Удалить все версии, кроме последней?',
+      pruned: 'Удалено версий',
       versionSaved: 'Версия сохранена',
       versionApplied: 'Версия применена',
       close: 'Закрыть',
@@ -203,6 +206,9 @@ window.__ModuleLoader__.load({
       saveVersion: 'Save version',
       versionLabel: 'Version label',
       noVersions: 'No versions yet',
+      pruneVersions: 'Keep the latest',
+      confirmPrune: 'Delete every version except the latest one?',
+      pruned: 'Versions deleted',
       versionSaved: 'Version saved',
       versionApplied: 'Version applied',
       close: 'Close',
@@ -366,6 +372,9 @@ window.__ModuleLoader__.load({
       saveVersion: '保存版本',
       versionLabel: '版本标签',
       noVersions: '暂无版本',
+      pruneVersions: '只保留最新',
+      confirmPrune: '删除除最新版本外的所有版本？',
+      pruned: '已删除版本',
       versionSaved: '版本已保存',
       versionApplied: '版本已应用',
       close: '关闭',
@@ -1383,6 +1392,23 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const pruneVersionsNow = async () => {
+          if (!versions) return;
+          if (!window.confirm(t('confirmPrune'))) return;
+          const skill = versions.skill;
+          try {
+            const body = await api('/versions/prune', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ skill }),
+            });
+            await openVersions({ name: skill });
+            setNotice({ kind: 'ok', text: `${t('pruned')}: ${body.removed}` });
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          }
+        };
+
         const openVersions = async (skill) => {
           track('versions', skill.name);
           setPanelTick((value) => value + 1);
@@ -2360,7 +2386,25 @@ window.__ModuleLoader__.load({
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } },
               h('div', { style: styles.name }, `${t('versions')}: ${versions.skill}`),
-              h('button', { style: Object.assign({}, styles.button, styles.small), onClick: () => setVersions(null) }, t('close')),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 8 } },
+                (versions.list || []).length > 1
+                  ? h(
+                      'button',
+                      {
+                        style: Object.assign({}, styles.button, styles.small, styles.danger),
+                        onClick: pruneVersionsNow,
+                      },
+                      t('pruneVersions'),
+                    )
+                  : null,
+                h(
+                  'button',
+                  { style: Object.assign({}, styles.button, styles.small), onClick: () => setVersions(null) },
+                  t('close'),
+                ),
+              ),
             ),
             h(
               'div',

@@ -1115,6 +1115,34 @@ async function applyVersion(ctx, view, body, res) {
   sendJson(res, 200, { ok: true, skill, label, backup });
 }
 
+// Keeps only the most recently saved version of a skill.
+async function pruneVersions(ctx, body, res) {
+  const skill = typeof body.skill === 'string' ? body.skill : '';
+  validateName(skill);
+  const view = await resolveView(ctx, null);
+  const projectRoot = await findProjectRoot(view.cwd);
+  const dir = versionsDir(projectRoot, skill);
+  assertInside(dir, [join(projectRoot, '.dsh')]);
+  const labels = await readdir(dir).catch(() => []);
+  const items = [];
+  for (const label of labels) {
+    try {
+      const info = await stat(join(dir, label, 'SKILL.md'));
+      items.push({ label, mtime: info.mtimeMs });
+    } catch {
+      // not a version directory
+    }
+  }
+  items.sort((a, b) => b.mtime - a.mtime);
+  const kept = items.length > 0 ? items[0].label : null;
+  let removed = 0;
+  for (const item of items.slice(1)) {
+    await rm(join(dir, item.label), { recursive: true, force: true });
+    removed += 1;
+  }
+  sendJson(res, 200, { ok: true, removed, kept });
+}
+
 async function removeVersion(ctx, url, res) {
   const skill = url.searchParams.get('skill');
   validateName(skill);
@@ -1593,6 +1621,21 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await applyVersion(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/versions/prune`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await pruneVersions(ctx, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }
