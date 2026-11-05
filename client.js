@@ -69,6 +69,17 @@ window.__ModuleLoader__.load({
       catalogLoading: 'Загружаем каталог…',
       allInstalled: 'Все скиллы категории уже установлены',
       installScope: 'Установить',
+      tabCompare: 'Сравнение',
+      compareTask: 'Задача для сравнения (необязательно)',
+      compareTaskPlaceholder: 'Например: подготовить квартальный отчёт с таблицей',
+      runCompare: 'Сравнить',
+      comparing: 'Сравниваем…',
+      chooseLeft: 'Выбрать левый',
+      chooseRight: 'Выбрать правый',
+      comparePick: 'Выберите скиллы слева и справа',
+      verdictWinner: 'Лучше по оценке',
+      currentVersion: 'текущая',
+      chosen: 'Выбрано',
       source_project_dsh: 'проект',
       source_project_agents: 'проект (.agents)',
       source_user_dsh: 'пользователь',
@@ -137,6 +148,17 @@ window.__ModuleLoader__.load({
       catalogLoading: 'Loading catalog…',
       allInstalled: 'Every skill in this category is already installed',
       installScope: 'Install to',
+      tabCompare: 'Compare',
+      compareTask: 'Task to compare on (optional)',
+      compareTaskPlaceholder: 'For example: prepare a quarterly report with a table',
+      runCompare: 'Compare',
+      comparing: 'Comparing…',
+      chooseLeft: 'Choose left',
+      chooseRight: 'Choose right',
+      comparePick: 'Pick a skill on both sides',
+      verdictWinner: 'AI verdict',
+      currentVersion: 'current',
+      chosen: 'Chosen',
       source_project_dsh: 'project',
       source_project_agents: 'project (.agents)',
       source_user_dsh: 'user',
@@ -364,6 +386,15 @@ window.__ModuleLoader__.load({
         const [busy, setBusy] = React.useState(null);
         const [notice, setNotice] = React.useState(null);
         const [versions, setVersions] = React.useState(null);
+        const [compare, setCompare] = React.useState({
+          left: { skill: '', label: '' },
+          right: { skill: '', label: '' },
+          task: '',
+          busy: false,
+          error: null,
+          result: null,
+          versions: { left: [], right: [] },
+        });
         const [installScope, setInstallScope] = React.useState('project');
 
         const loadSkills = React.useCallback(async (cwd) => {
@@ -618,6 +649,199 @@ window.__ModuleLoader__.load({
 
         const data = skillsState.status === 'ready' ? skillsState.data : null;
         const catalog = catalogState.status === 'ready' ? catalogState.data : null;
+
+        const loadCompareVersions = async (side, skill) => {
+          if (!skill) return;
+          try {
+            const body = await api(`/versions?skill=${encodeURIComponent(skill)}`);
+            setCompare((current) =>
+              Object.assign({}, current, {
+                versions: Object.assign({}, current.versions, { [side]: body.versions }),
+              }),
+            );
+          } catch {
+            setCompare((current) =>
+              Object.assign({}, current, { versions: Object.assign({}, current.versions, { [side]: [] }) }),
+            );
+          }
+        };
+
+        const setCompareSide = (side, patch) => {
+          setCompare((current) => {
+            const next = Object.assign({}, current, { [side]: Object.assign({}, current[side], patch) });
+            if (patch.skill !== undefined) {
+              next.versions = Object.assign({}, current.versions, { [side]: [] });
+            }
+            return next;
+          });
+          if (patch.skill !== undefined && patch.skill !== '') loadCompareVersions(side, patch.skill);
+        };
+
+        const runCompare = async () => {
+          if (!compare.left.skill || !compare.right.skill) {
+            setCompare((current) => Object.assign({}, current, { error: t('comparePick') }));
+            return;
+          }
+          setCompare((current) => Object.assign({}, current, { busy: true, error: null, result: null }));
+          try {
+            const body = await api('/compare', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                left: { name: compare.left.skill, label: compare.left.label || undefined },
+                right: { name: compare.right.skill, label: compare.right.label || undefined },
+                task: compare.task,
+              }),
+            });
+            setCompare((current) => Object.assign({}, current, { busy: false, result: body }));
+          } catch (error) {
+            setCompare((current) =>
+              Object.assign({}, current, {
+                busy: false,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          }
+        };
+
+        const chooseVariant = async (side) => {
+          if (!compare.result) return;
+          const pick = compare.result[side];
+          if (compare.result.left.name === compare.result.right.name && pick.label) {
+            try {
+              await api('/versions/apply', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ skill: pick.name, label: pick.label }),
+              });
+              setNotice({ kind: 'ok', text: t('versionApplied') });
+              await refresh();
+            } catch (error) {
+              setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+            }
+            return;
+          }
+          setNotice({ kind: 'ok', text: `${t('chosen')}: ${pick.name}${pick.label ? ' / ' + pick.label : ''}` });
+        };
+
+        const renderCompare = () => {
+          const skills = data ? data.skills : [];
+          const sideCard = (side, title) => {
+            const sideState = compare[side];
+            const sideVersions = compare.versions[side] || [];
+            return h(
+              'div',
+              { style: Object.assign({}, styles.form, { flex: '1 1 320px', marginTop: 0 }) },
+              h('div', { style: styles.name }, title),
+              h(
+                'select',
+                {
+                  style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
+                  value: sideState.skill,
+                  onChange: (event) => setCompareSide(side, { skill: event.target.value, label: '' }),
+                },
+                h('option', { value: '' }, '—'),
+                skills.map((skill) => h('option', { key: skill.name, value: skill.name }, skill.name)),
+              ),
+              h(
+                'select',
+                {
+                  style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
+                  value: sideState.label,
+                  onChange: (event) => setCompareSide(side, { label: event.target.value }),
+                },
+                h('option', { value: '' }, t('currentVersion')),
+                sideVersions.map((version) => h('option', { key: version.label, value: version.label }, version.label)),
+              ),
+            );
+          };
+
+          const result = compare.result;
+          const column = (side) => {
+            if (!result) return null;
+            const item = result[side];
+            const verdict = side === 'left' ? result.verdict.left : result.verdict.right;
+            return h(
+              'div',
+              { style: Object.assign({}, styles.form, { flex: '1 1 320px', marginTop: 0, minWidth: 0 }) },
+              h('div', { style: styles.name }, `${item.name}${item.label ? ' / ' + item.label : ''}`),
+              h(
+                'pre',
+                {
+                  style: Object.assign({}, styles.textarea, {
+                    whiteSpace: 'pre-wrap',
+                    maxHeight: 240,
+                    minHeight: 0,
+                    overflow: 'auto',
+                  }),
+                },
+                item.body,
+              ),
+              h('div', { style: Object.assign({}, styles.description, { whiteSpace: 'pre-wrap' }) }, verdict),
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.button, styles.small, styles.primary, { marginTop: 10 }),
+                  onClick: () => chooseVariant(side),
+                },
+                side === 'left' ? t('chooseLeft') : t('chooseRight'),
+              ),
+            );
+          };
+
+          return h(
+            'div',
+            null,
+            h(
+              'div',
+              { style: { display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 18 } },
+              sideCard('left', 'A'),
+              sideCard('right', 'B'),
+            ),
+            h(
+              'label',
+              { style: styles.field },
+              h('span', { style: styles.fieldLabel }, t('compareTask')),
+              h('textarea', {
+                style: Object.assign({}, styles.textarea, { minHeight: 70, fontFamily: 'inherit' }),
+                value: compare.task,
+                placeholder: t('compareTaskPlaceholder'),
+                onChange: (event) => setCompare((current) => Object.assign({}, current, { task: event.target.value })),
+              }),
+            ),
+            compare.error ? h('div', { style: styles.error }, compare.error) : null,
+            h(
+              'div',
+              { style: { marginTop: 10 } },
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.button, styles.primary),
+                  disabled: compare.busy,
+                  onClick: runCompare,
+                },
+                compare.busy ? t('comparing') : t('runCompare'),
+              ),
+            ),
+            result
+              ? h(
+                  'div',
+                  null,
+                  h(
+                    'div',
+                    { style: { display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 18 } },
+                    column('left'),
+                    column('right'),
+                  ),
+                  h(
+                    'div',
+                    { style: styles.note },
+                    `${t('verdictWinner')}: ${result.verdict.winner === 'tie' ? '—' : result.verdict.winner === 'left' ? 'A' : 'B'}`,
+                  ),
+                )
+              : null,
+          );
+        };
 
         const renderEditor = () =>
           h(
@@ -1052,13 +1276,21 @@ window.__ModuleLoader__.load({
                 },
                 t('tabCatalog'),
               ),
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.tab, tab === 'compare' ? styles.tabActive : null),
+                  onClick: () => setTab('compare'),
+                },
+                t('tabCompare'),
+              ),
             ),
             notice
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
               : null,
             tab === 'installed' ? (editor ? renderEditor() : null) : null,
             tab === 'installed' ? (versions ? renderVersions() : null) : null,
-            tab === 'installed' ? renderInstalled() : renderCatalog(),
+            tab === 'installed' ? renderInstalled() : tab === 'catalog' ? renderCatalog() : renderCompare(),
           ),
         );
       };

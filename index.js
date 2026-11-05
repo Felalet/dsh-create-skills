@@ -573,6 +573,116 @@ async function removeVersion(ctx, url, res) {
   sendJson(res, 200, { ok: true });
 }
 
+async function readVariant(ctx, view, spec) {
+  if (!spec || typeof spec.name !== 'string') throw new HttpError(400, 'skill name is required for each side');
+  validateName(spec.name);
+  if (spec.label) {
+    const projectRoot = await findProjectRoot(view.cwd);
+    const label = safeLabel(spec.label);
+    const file = join(versionsDir(projectRoot, spec.name), label, 'SKILL.md');
+    assertInside(file, [join(projectRoot, '.dsh')]);
+    if (!(await exists(file))) throw new HttpError(404, `version "${label}" of "${spec.name}" not found`);
+    const raw = await readFile(file, 'utf8');
+    return { name: spec.name, label, raw, body: splitFrontmatter(raw).body };
+  }
+  const skills = ctx.get('skills');
+  if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
+  const definition = await skills.get(spec.name, { cwd: view.cwd, scope: view.scope });
+  if (!definition) throw new HttpError(404, `skill "${spec.name}" not found`);
+  return { name: spec.name, label: null, raw: definition.content, body: splitFrontmatter(definition.content).body };
+}
+
+function buildComparePrompt(left, right, task) {
+  const clip = (text) => (text.length > 9000 ? `${text.slice(0, 9000)}\n…(обрезано)` : text);
+  const goal = task === '' ? 'общая пригодность скилла для работы с проектом' : task;
+  return [
+    'Ты оцениваешь два варианта скилла — инструкций, которые получает ИИ-агент.',
+    `Задача, для которой сравниваем: ${goal}.`,
+    '',
+    `Скилл A (${left.name}${left.label ? ' / ' + left.label : ''}):`,
+    clip(left.body),
+    '',
+    `Скилл B (${right.name}${right.label ? ' / ' + right.label : ''}):`,
+    clip(right.body),
+    '',
+    'Сравни их по критериям: следование задаче, конкретность и полнота инструкций, риск ошибок, краткость.',
+    'Ответь строго одним JSON-объектом без markdown и без пояснений:',
+    '{"left":"2-4 предложения: что лучше и что хуже в A","right":"2-4 предложения: что лучше и что хуже в B","winner":"left|right|tie"}',
+    'Пиши по-русски.',
+  ].join('\n');
+}
+
+function parseVerdict(text) {
+  const match = /\{[\s\S]*\}/.exec(text);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      return {
+        left: typeof parsed.left === 'string' ? parsed.left : '',
+        right: typeof parsed.right === 'string' ? parsed.right : '',
+        winner: parsed.winner === 'left' || parsed.winner === 'right' ? parsed.winner : 'tie',
+      };
+    } catch {
+      // fall through to the raw text
+    }
+  }
+  return { left: text.trim(), right: '', winner: 'tie' };
+}
+
+async function judgeVariants(ctx, prompt) {
+  const llm = ctx.get('llm');
+  if (!llm) throw new HttpError(503, 'llm service is not available in this profile');
+  const model = ctx.get('agentDefaultModel');
+  const selection = model?.currentSelection?.();
+  if (!selection || !selection.provider || !selection.model) {
+    throw new HttpError(503, 'no default model is configured');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90_000);
+  let text = '';
+  try {
+    const stream = llm.stream({
+      provider: selection.provider,
+      model: selection.model,
+      system: 'Ты — строгий и справедливый оценщик инструкций для ИИ-агентов. Отвечай только JSON, как просят.',
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      temperature: 0.2,
+      maxTokens: 3000,
+      signal: controller.signal,
+    });
+    for await (const chunk of stream) {
+      if (chunk.type === 'text-delta') text += chunk.text;
+      if (chunk.type === 'finish' && chunk.reason.kind !== 'stop' && chunk.reason.kind !== 'max-tokens') {
+        if (chunk.reason.kind === 'error') {
+          throw new HttpError(502, `model error: ${chunk.reason.failure?.message ?? 'unknown'}`);
+        }
+        if (chunk.reason.kind === 'aborted') throw new HttpError(504, 'model call was aborted');
+        throw new HttpError(502, `model stopped with ${chunk.reason.kind}`);
+      }
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (controller.signal.aborted) throw new HttpError(504, 'model call timed out');
+    throw new HttpError(502, error instanceof Error ? error.message : String(error));
+  } finally {
+    clearTimeout(timer);
+  }
+  return parseVerdict(text);
+}
+
+async function compareVariants(ctx, view, body, res) {
+  const left = await readVariant(ctx, view, body.left);
+  const right = await readVariant(ctx, view, body.right);
+  const task = typeof body.task === 'string' ? body.task.trim() : '';
+  const verdict = await judgeVariants(ctx, buildComparePrompt(left, right, task));
+  sendJson(res, 200, {
+    left: { name: left.name, label: left.label, body: left.body },
+    right: { name: right.name, label: right.label, body: right.body },
+    verdict,
+  });
+}
+
 export function apply(ctx) {
   const routes = [
     {
@@ -675,6 +785,23 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await applyVersion(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/compare`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await compareVariants(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }
