@@ -3,8 +3,9 @@
 // both outputs, so the SVG and the PNG preview agree.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT = path.resolve('C:/Users/User/Documents/deepseek-harness/default-workspace/create-skills/icons');
+const OUT = path.dirname(fileURLToPath(import.meta.url));
 
 const VARIANTS = [
   {

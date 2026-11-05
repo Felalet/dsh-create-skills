@@ -5,11 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { join, dirname, basename, resolve, sep, isAbsolute, relative } from 'node:path';
 import * as fsp from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
-const source = fs.readFileSync(
-  'C:/Users/User/Documents/deepseek-harness/default-workspace/create-skills/index.js',
-  'utf8',
-);
+const source = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
 
 const grab = (name) => {
   const marker = source.indexOf(`function ${name}(`);

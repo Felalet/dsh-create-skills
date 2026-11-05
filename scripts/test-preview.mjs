@@ -2,11 +2,9 @@
 // host plumbing, so the URL shape and response contract are checked without
 // booting DSH.
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const source = fs.readFileSync(
-  'C:/Users/User/Documents/deepseek-harness/default-workspace/create-skills/index.js',
-  'utf8',
-);
+const source = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
 
 const grab = (name) => {
   const start = source.indexOf(`async function ${name}(`);
@@ -29,7 +27,7 @@ class HttpError extends Error {
   }
 }
 
-const CATALOG_PATH = 'C:/Users/User/Documents/deepseek-harness/default-workspace/create-skills/catalog/catalog.json';
+const CATALOG_PATH = fileURLToPath(new URL('../catalog/catalog.json', import.meta.url));
 const previewCache = new Map();
 const MAX_PREVIEW_BYTES = 512 * 1024;
 const readFile = fs.promises.readFile;
@@ -38,7 +36,7 @@ const sendJson = (res, status, value) => {
   sent = { status, value };
 };
 
-const code = grab('previewCatalogEntry');
+const code = [grab('fetchCatalogEntry'), grab('previewCatalogEntry')].join('\n\n');
 const run = new Function(
   'readFile', 'fetch', 'HttpError', 'CATALOG_PATH', 'previewCache', 'MAX_PREVIEW_BYTES', 'sendJson',
   `${code}\nreturn previewCatalogEntry;`,

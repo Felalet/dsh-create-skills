@@ -75,6 +75,26 @@ if (ru.length === 0 || en.length === 0 || zh.length === 0) {
     if (extra.length) failures.push(`${label} has extra: ${extra.join(', ')}`);
   }
   console.log(`dictionaries: ru ${ru.length}, en ${en.length}, zh ${zh.length}`);
+
+  // Every t('key') / tr('key') must exist in the dictionary, otherwise the UI
+  // would render the raw key name.
+  const used = new Set([
+    ...[...source.matchAll(/\bt\(\s*'([^']+)'\s*\)/g)].map((match) => match[1]),
+    ...[...source.matchAll(/\btr\(\s*'([^']+)'\s*\)/g)].map((match) => match[1]),
+  ]);
+  const missingKeys = [...used].filter((key) => !ru.includes(key));
+  if (missingKeys.length) failures.push(`t() keys missing in ru: ${missingKeys.join(', ')}`);
+
+  // Hardcoded Russian outside the RU dictionary means an untranslated string.
+  const ruStart = source.indexOf('const RU = {');
+  const ruEnd = source.indexOf('\n    };', ruStart);
+  const outsideRu = source.slice(0, ruStart) + source.slice(ruEnd);
+  const hardcoded = outsideRu
+    .split(/\r?\n/)
+    .filter((line) => /[А-Яа-яЁё]/.test(line) && !/^\s*\/\//.test(line));
+  if (hardcoded.length > 0) {
+    failures.push(`hardcoded Cyrillic outside the RU dictionary (${hardcoded.length} lines)`);
+  }
 }
 
 if (failures.length > 0) {

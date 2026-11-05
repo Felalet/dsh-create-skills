@@ -1,8 +1,9 @@
 // Adds English titles/descriptions to the catalog: Russian stays for `ru`,
 // English serves every other UI language.
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const FILE = 'C:/Users/User/Documents/deepseek-harness/default-workspace/create-skills/catalog/catalog.json';
+const FILE = fileURLToPath(new URL('../catalog/catalog.json', import.meta.url));
 const catalog = JSON.parse(fs.readFileSync(FILE, 'utf8'));
 
 const CATEGORY_EN = {
