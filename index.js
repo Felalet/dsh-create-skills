@@ -7,8 +7,8 @@
 // they do for the model.
 import process from 'node:process';
 import { homedir } from 'node:os';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
@@ -73,6 +73,13 @@ function dshHome() {
   return process.env.DSH_HOME && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : join(homedir(), '.dsh');
 }
 
+// The shared agents root: `$DSH_AGENTS_HOME/skills`, `~/.agents/skills` by default.
+// It is a sibling of the DSH home, not a subdirectory of it.
+function agentsHome() {
+  const configured = process.env.DSH_AGENTS_HOME;
+  return configured && configured !== '' ? configured : join(homedir(), '.agents');
+}
+
 async function exists(path) {
   try {
     await stat(path);
@@ -100,17 +107,30 @@ function allowedRoots(projectRoot) {
     join(projectRoot, '.dsh', 'skills'),
     join(projectRoot, '.agents', 'skills'),
     join(dshHome(), 'skills'),
-    join(dshHome(), 'agents', 'skills'),
+    join(agentsHome(), 'skills'),
   ];
 }
 
+// Windows and default macOS filesystems compare paths case-insensitively;
+// path.relative already folds case on win32, so only darwin needs the help.
+function comparablePath(path) {
+  return process.platform === 'darwin' ? path.toLowerCase() : path;
+}
+
+// True when `path` is `root` itself or lives below it. A string prefix check
+// breaks on the filesystem root and on case-insensitive filesystems, so the
+// containment test goes through path.relative, which also rejects other drives.
+function isInsidePath(path, root) {
+  const step = relative(comparablePath(resolve(root)), comparablePath(resolve(path)));
+  if (step === '') return true;
+  if (isAbsolute(step)) return false;
+  return step !== '..' && !step.startsWith(`..${sep}`);
+}
+
 function assertInside(path, roots) {
-  const target = resolve(path);
-  for (const root of roots) {
-    const base = resolve(root);
-    if (target === base || target.startsWith(base + sep)) return;
+  if (!roots.some((root) => isInsidePath(path, root))) {
+    throw new HttpError(403, 'path is outside the writable skill roots');
   }
-  throw new HttpError(403, 'path is outside the writable skill roots');
 }
 
 async function resolveView(ctx, requested) {
@@ -527,9 +547,17 @@ function parseTar(buffer) {
     const name = readTarString(header, 0, 100);
     const prefix = readTarString(header, 345, 155);
     const size = Number.parseInt(readTarString(header, 124, 12).trim() || '0', 8);
+    const mode = Number.parseInt(readTarString(header, 100, 8).trim() || '0', 8);
     const type = String.fromCharCode(header[156] || 48);
+    const linkName = readTarString(header, 157, 100);
     const start = offset + 512;
-    entries.push({ name: prefix ? `${prefix}/${name}` : name, type, data: buffer.subarray(start, start + size) });
+    entries.push({
+      name: prefix ? `${prefix}/${name}` : name,
+      type,
+      mode,
+      linkName,
+      data: buffer.subarray(start, start + size),
+    });
     offset = start + Math.ceil(size / 512) * 512;
   }
   return entries;
@@ -564,15 +592,30 @@ async function installEntry(entry, targetRoot) {
   try {
     for (const item of entries) {
       if (!item.name.startsWith(prefix)) continue;
-      const relative = item.name.slice(prefix.length);
-      if (relative === '' || relative.includes('..') || relative.startsWith('/')) continue;
-      const destination = join(target, relative);
-      assertInside(destination, [target]);
+      const bare = item.name.slice(prefix.length);
+      if (bare === '') continue;
+      const destination = join(target, bare);
+      if (!isInsidePath(destination, target)) continue;
       if (item.type === '5') {
         await mkdir(destination, { recursive: true });
+      } else if (item.type === '2') {
+        // Bundled symlinks are common on Linux and macOS checkouts. Keep the
+        // link only when it stays inside the installed skill.
+        if (!item.linkName) continue;
+        if (!isInsidePath(resolve(dirname(destination), item.linkName), target)) continue;
+        await mkdir(dirname(destination), { recursive: true });
+        try {
+          await symlink(item.linkName, destination);
+        } catch {
+          // Windows without symlink rights: the bundle still installs, minus the link.
+        }
       } else if (item.type === '0') {
         await mkdir(dirname(destination), { recursive: true });
         await writeFile(destination, item.data);
+        // Tar modes matter on POSIX: a shipped script must stay executable.
+        if (process.platform !== 'win32' && (item.mode & 0o111) !== 0) {
+          await chmod(destination, (item.mode & 0o777) | 0o600).catch(() => {});
+        }
       }
     }
   } catch (error) {
@@ -746,6 +789,13 @@ async function readVariant(ctx, view, spec) {
   return { name: spec.name, label: null, raw: definition.content, body: splitFrontmatter(definition.content).body };
 }
 
+// The UI sends the active locale id; the model needs a language name.
+function promptLanguage(lang) {
+  if (lang === 'ru') return 'Russian';
+  if (lang === 'zh') return 'Chinese';
+  return 'English';
+}
+
 function buildComparePrompt(left, right, task, language) {
   const clip = (text) => (text.length > 9000 ? `${text.slice(0, 9000)}\n…(обрезано)` : text);
   const goal = task === '' ? 'общая пригодность скилла для работы с проектом' : task;
@@ -838,7 +888,7 @@ async function compareVariants(ctx, view, body, res) {
   const left = await readVariant(ctx, view, body.left);
   const right = await readVariant(ctx, view, body.right);
   const task = typeof body.task === 'string' ? body.task.trim() : '';
-  const language = body.lang === 'ru' ? 'Russian' : 'English';
+  const language = promptLanguage(body.lang);
   const verdict = await judgeVariants(ctx, buildComparePrompt(left, right, task, language));
   sendJson(res, 200, {
     left: { name: left.name, label: left.label, body: left.body },
@@ -955,7 +1005,7 @@ async function suggestCategory(ctx, view, body, res) {
     .map((category) => `${category.id} — ${category.title}`)
     .join('\n');
   const content = typeof body.content === 'string' ? body.content.slice(0, 3000) : '';
-  const language = body.lang === 'ru' ? 'Russian' : 'English';
+  const language = promptLanguage(body.lang);
   const prompt = [
     'Выбери категорию для скилла или предложи новую короткую категорию.',
     'Существующие категории (id — название):',
@@ -993,7 +1043,7 @@ async function groupByTask(ctx, view, body, res) {
     return;
   }
   const list = skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n');
-  const language = body.lang === 'ru' ? 'Russian' : 'English';
+  const language = promptLanguage(body.lang);
   const prompt = [
     `Задача: ${task}`,
     'Ниже список скиллов. Сгруппируй их под эту задачу в 3–6 групп так, чтобы было понятно, что применять на каждом шаге.',

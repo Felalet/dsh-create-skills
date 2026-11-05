@@ -6,22 +6,30 @@
     {
       "id": "documents",
       "title": "Документы",
-      "description": "Word, Excel, PowerPoint и PDF: создание, правка, извлечение данных."
+      "titleEn": "Documents",
+      "description": "Word, Excel, PowerPoint и PDF: создание, правка, извлечение данных.",
+      "descriptionEn": "Word, Excel, PowerPoint and PDF: create, edit, extract data."
     },
     {
       "id": "development",
       "title": "Разработка",
-      "description": "MCP-серверы, тестирование веб-приложений, сборка HTML-артефактов."
+      "titleEn": "Development",
+      "description": "MCP-серверы, тестирование веб-приложений, сборка HTML-артефактов.",
+      "descriptionEn": "MCP servers, web app testing, HTML artifact builds."
     },
     {
       "id": "design",
       "title": "Дизайн",
-      "description": "Визуальные артефакты и фирменные гайдлайны."
+      "titleEn": "Design",
+      "description": "Визуальные артефакты и фирменные гайдлайны.",
+      "descriptionEn": "Visual artifacts and brand guidelines."
     },
     {
       "id": "meta",
       "title": "Мета",
-      "description": "Создание и улучшение самих скиллов."
+      "titleEn": "Meta",
+      "description": "Создание и улучшение самих скиллов.",
+      "descriptionEn": "Creating and improving skills themselves."
     }
   ],
   "skills": [
@@ -29,7 +37,9 @@
       "id": "docx",
       "name": "docx",
       "title": "Word-документы",
+      "titleEn": "Word documents",
       "description": "Создание, чтение и правка .docx: текст, стили, таблицы, колонтитулы; сохранение исходного форматирования.",
+      "descriptionEn": "Create, read and edit .docx files: text, styles, tables, headers and footers; keeps the original formatting.",
       "category": "documents",
       "tags": ["word", "docx", "офис", "документ"],
       "source": {
@@ -45,7 +55,9 @@
       "id": "pdf",
       "name": "pdf",
       "title": "PDF",
+      "titleEn": "PDF",
       "description": "Извлечение текста и таблиц, создание, объединение и разделение PDF, работа с формами.",
+      "descriptionEn": "Extract text and tables, create, merge and split PDFs, and work with forms.",
       "category": "documents",
       "tags": ["pdf", "документ", "таблицы"],
       "source": {
@@ -61,7 +73,9 @@
       "id": "pptx",
       "name": "pptx",
       "title": "Презентации",
+      "titleEn": "Presentations",
       "description": "Создание и правка презентаций PowerPoint: слайды, макеты, заметки, экспорт.",
+      "descriptionEn": "Create and edit PowerPoint decks: slides, layouts, notes, export.",
       "category": "documents",
       "tags": ["powerpoint", "pptx", "слайды"],
       "source": {
@@ -77,7 +91,9 @@
       "id": "xlsx",
       "name": "xlsx",
       "title": "Таблицы",
+      "titleEn": "Spreadsheets",
       "description": "Электронные таблицы Excel: формулы, форматирование, анализ данных, диаграммы.",
+      "descriptionEn": "Excel workbooks: formulas, formatting, data analysis, charts.",
       "category": "documents",
       "tags": ["excel", "xlsx", "таблицы", "формулы"],
       "source": {
@@ -93,7 +109,9 @@
       "id": "mcp-builder",
       "name": "mcp-builder",
       "title": "MCP-серверы",
+      "titleEn": "MCP servers",
       "description": "Пошаговое создание MCP-серверов: инструменты, ресурсы, промпты, тесты и отладка.",
+      "descriptionEn": "Step-by-step MCP server development: tools, resources, prompts, tests and debugging.",
       "category": "development",
       "tags": ["mcp", "сервер", "инструменты"],
       "source": {
@@ -109,7 +127,9 @@
       "id": "webapp-testing",
       "name": "webapp-testing",
       "title": "Тестирование веба",
+      "titleEn": "Web app testing",
       "description": "Тестирование локальных веб-приложений через Playwright: сценарии, скриншоты, отладка.",
+      "descriptionEn": "Test local web apps with Playwright: scenarios, screenshots, debugging.",
       "category": "development",
       "tags": ["playwright", "тесты", "браузер"],
       "source": {
@@ -125,7 +145,9 @@
       "id": "web-artifacts-builder",
       "name": "web-artifacts-builder",
       "title": "HTML-артефакты",
+      "titleEn": "HTML artifacts",
       "description": "Сборка многосоставных HTML-артефактов на React, Tailwind и shadcn в одном файле.",
+      "descriptionEn": "Build multi-part HTML artifacts with React, Tailwind and shadcn in a single file.",
       "category": "development",
       "tags": ["react", "tailwind", "html", "артефакт"],
       "source": {
@@ -141,7 +163,9 @@
       "id": "canvas-design",
       "name": "canvas-design",
       "title": "Визуальный дизайн",
+      "titleEn": "Visual design",
       "description": "Постеры и визуальные артефакты в PNG и PDF по текстовому запросу.",
+      "descriptionEn": "Posters and visual artifacts in PNG and PDF from a text prompt.",
       "category": "design",
       "tags": ["дизайн", "постер", "png", "pdf"],
       "source": {
@@ -157,7 +181,9 @@
       "id": "brand-guidelines",
       "name": "brand-guidelines",
       "title": "Бренд-гайдлайны",
+      "titleEn": "Brand guidelines",
       "description": "Фирменные цвета и типографика Anthropic для оформления документов и артефактов.",
+      "descriptionEn": "Anthropic brand colors and typography for documents and artifacts.",
       "category": "design",
       "tags": ["бренд", "цвета", "типографика"],
       "source": {
@@ -173,7 +199,9 @@
       "id": "skill-creator",
       "name": "skill-creator",
       "title": "Создание скиллов",
+      "titleEn": "Skill creation",
       "description": "Мета-скилл: помогает проектировать и писать новые скиллы по стандарту Agent Skills.",
+      "descriptionEn": "Meta-skill: helps design and write new skills to the Agent Skills standard.",
       "category": "meta",
       "tags": ["скилл", "мета", "авторство"],
       "source": {

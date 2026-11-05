@@ -69,6 +69,7 @@ window.__ModuleLoader__.load({
       scopeUser: 'в пользовательские',
       name: 'Имя (kebab-case)',
       description: 'Описание (одна строка, до 200 символов)',
+      descriptionPlaceholder: 'Что делает и когда применять — по этой строке модель выбирает скилл',
       whenToUse: 'Когда применять (необязательно)',
       content: 'Инструкции (Markdown)',
       created: 'Скилл создан',
@@ -107,7 +108,25 @@ window.__ModuleLoader__.load({
       diffTitle: 'Различия',
       sameText: 'Тексты совпадают',
       diffTooBig: '…текст слишком большой для построчного сравнения…',
-      newSkillTemplate: '# Новый скилл\n\n',
+      newSkillTemplate:
+        '# Новый скилл\n\n' +
+        '<!--\n' +
+        'Подсказка. Удалите этот комментарий после заполнения — он попадёт в текст скилла.\n\n' +
+        'Что нужно скиллу:\n' +
+        '- Имя — латиница, kebab-case (my-skill); совпадает с именем папки.\n' +
+        '- Описание — одна строка до 200 символов: что делает скилл и когда его применять.\n' +
+        '  Модель выбирает скилл по этому тексту, поэтому начинайте с действия.\n' +
+        '- Когда применять — необязательно: уточняет триггер, если описание общее.\n' +
+        '- Инструкции — шаги и правила в императиве, критерии готовности, примеры.\n' +
+        '  Файлы рядом со SKILL.md (references/, scripts/) указывайте относительными путями.\n' +
+        '-->\n\n' +
+        '## Когда применять\n\n' +
+        'Короткий триггер: с какой задачей приходит пользователь.\n\n' +
+        '## Шаги\n\n' +
+        '1. Первый шаг.\n' +
+        '2. Второй шаг.\n\n' +
+        '## Проверка\n\n' +
+        '- Как убедиться, что результат верный.\n',
       backupSaved: 'бэкап',
       currentVersion: 'текущая',
       chosen: 'Выбрано',
@@ -179,6 +198,7 @@ window.__ModuleLoader__.load({
       scopeUser: 'user',
       name: 'Name (kebab-case)',
       description: 'Description (one line, up to 200 chars)',
+      descriptionPlaceholder: 'What it does and when to use it — the model picks skills by this line',
       whenToUse: 'When to use (optional)',
       content: 'Instructions (Markdown)',
       created: 'Skill created',
@@ -217,7 +237,25 @@ window.__ModuleLoader__.load({
       diffTitle: 'Differences',
       sameText: 'Texts are identical',
       diffTooBig: '…text is too large for a line diff…',
-      newSkillTemplate: '# New skill\n\n',
+      newSkillTemplate:
+        '# New skill\n\n' +
+        '<!--\n' +
+        'Hint. Delete this comment after you fill the template: it becomes part of the skill text.\n\n' +
+        'What a skill needs:\n' +
+        '- Name — lowercase ASCII kebab-case (my-skill), matching the folder name.\n' +
+        '- Description — one line up to 200 characters: what the skill does and when to apply it.\n' +
+        '  The model picks skills by this text, so start with an action.\n' +
+        '- When to use — optional; narrows the trigger when the description is broad.\n' +
+        '- Instructions — imperative steps, rules, done criteria, examples.\n' +
+        '  Reference files next to SKILL.md (references/, scripts/) by relative path.\n' +
+        '-->\n\n' +
+        '## When to use\n\n' +
+        'Short trigger: the task the user brings.\n\n' +
+        '## Steps\n\n' +
+        '1. First step.\n' +
+        '2. Second step.\n\n' +
+        '## Check\n\n' +
+        '- How to verify the result.\n',
       backupSaved: 'backup',
       currentVersion: 'current',
       chosen: 'Chosen',
@@ -228,6 +266,135 @@ window.__ModuleLoader__.load({
       source_custom: 'custom',
       source_bundled: 'bundled',
       source_runtime: 'runtime',
+    };
+
+    const ZH = {
+      title: '技能',
+      subtitle: '项目技能：来源、提示词占用与模型可见性。',
+      tabInstalled: '已安装',
+      tabCatalog: '技能库',
+      newSkill: '新建技能',
+      refresh: '刷新',
+      load: '加载',
+      pathPlaceholder: '项目路径',
+      loading: '加载中…',
+      saving: '正在保存…',
+      error: '错误',
+      retry: '重试',
+      empty: '此项目还没有技能',
+      emptyHint: '创建 .dsh/skills/<名称>/SKILL.md —— 技能会立即出现在这里，无需重启。',
+      modelOff: '对模型隐藏',
+      modelOn: '对模型可见',
+      tokens: '令牌/请求',
+      skills: '个技能',
+      incomplete: '技能目录不完整：部分来源未响应。',
+      estimate: '占用为按名称和描述长度估算。',
+      budgetOver: '技能目录过大',
+      budgetHint: '关闭不常用的技能：它们仍可通过 /名称 调用，但不会出现在模型提示词中。',
+      versions: '版本',
+      saveVersion: '保存版本',
+      versionLabel: '版本标签',
+      noVersions: '暂无版本',
+      versionSaved: '版本已保存',
+      versionApplied: '版本已应用',
+      close: '关闭',
+      apply: '应用',
+      readOnly: '只读',
+      edit: '编辑',
+      save: '保存',
+      cancel: '取消',
+      create: '创建',
+      delete: '删除',
+      enable: '启用',
+      disable: '停用',
+      confirmDelete: '删除技能',
+      scope: '保存位置',
+      category: '分类',
+      noCategory: '无分类',
+      newCategory: '自定义分类',
+      newCategoryPrompt: '新分类名称',
+      suggestCategory: '由 AI 推荐分类',
+      createCategoryConfirm: '创建分类',
+      groupTask: '任务',
+      groupTaskPlaceholder: '例如：上线一个落地页',
+      groupRun: '按任务分组',
+      groupReset: '普通视图',
+      groupOthers: '其他',
+      grouping: '正在分组…',
+      searchPlaceholder: '按名称搜索',
+      nothingFound: '未找到',
+      scopeProject: '项目内',
+      scopeUser: '用户目录',
+      name: '名称（kebab-case）',
+      description: '描述（一行，最多 200 字符）',
+      descriptionPlaceholder: '做什么、何时使用——模型依据这一行选择技能',
+      whenToUse: '何时使用（可选）',
+      content: '指令（Markdown）',
+      created: '技能已创建',
+      saved: '已保存',
+      deleted: '已删除',
+      installedNotice: '已安装',
+      install: '安装',
+      installing: '正在安装…',
+      installedBadge: '已安装',
+      installAll: '全部安装',
+      catalogEmpty: '技能库中没有技能',
+      catalogLoading: '正在加载技能库…',
+      allInstalled: '该分类中的技能都已安装',
+      installScope: '安装到',
+      tabCompare: '对比',
+      compareTask: '用于对比的任务（可选）',
+      compareTaskPlaceholder: '例如：准备一份带表格的季度报告',
+      runCompare: '对比',
+      comparing: '正在对比…',
+      improve: '优化技能',
+      improving: '正在优化…',
+      improvedSaved: '优化版本已保存',
+      chooseLeft: '选择左侧',
+      chooseRight: '选择右侧',
+      comparePick: '请在左右两侧各选择一个技能',
+      allCategories: '全部分类',
+      catBuiltin: '内置',
+      catMine: '我的技能',
+      catDocuments: '文档',
+      catDevelopment: '开发',
+      catDesign: '设计',
+      catMeta: '元技能',
+      verdictWinner: '评估更优者',
+      chooseAndDisable: '选择此技能并停用另一个',
+      otherReadOnly: '另一个是内置技能，无法停用',
+      diffTitle: '差异',
+      sameText: '文本相同',
+      diffTooBig: '…文本过大，无法逐行对比…',
+      newSkillTemplate:
+        '# 新技能\n\n' +
+        '<!--\n' +
+        '提示：填写完成后请删除这段注释，它会成为技能正文的一部分。\n\n' +
+        '技能需要什么：\n' +
+        '- 名称 —— 小写 ASCII，kebab-case（如 my-skill），与文件夹名一致。\n' +
+        '- 描述 —— 一行，最多 200 字符：技能做什么、何时使用。\n' +
+        '  模型根据这段文字选择技能，请以动作开头。\n' +
+        '- 何时使用 —— 可选；描述较宽泛时用来收窄触发条件。\n' +
+        '- 指令 —— 用祈使句写步骤与规则，给出完成标准和示例。\n' +
+        '  与 SKILL.md 同目录的文件（references/、scripts/）请用相对路径引用。\n' +
+        '-->\n\n' +
+        '## 何时使用\n\n' +
+        '一句话触发条件：用户带着什么任务而来。\n\n' +
+        '## 步骤\n\n' +
+        '1. 第一步。\n' +
+        '2. 第二步。\n\n' +
+        '## 检查\n\n' +
+        '- 如何确认结果正确。\n',
+      backupSaved: '备份',
+      currentVersion: '当前',
+      chosen: '已选择',
+      source_project_dsh: '项目',
+      source_project_agents: '项目（.agents）',
+      source_user_dsh: '用户',
+      source_user_agents: '用户（.agents）',
+      source_custom: '附加',
+      source_bundled: '内置',
+      source_runtime: '运行时',
     };
 
     const styles = {
@@ -385,7 +552,10 @@ window.__ModuleLoader__.load({
 
     function uiLang() {
       const lang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
-      return String(lang).toLowerCase().startsWith('ru') ? 'ru' : 'en';
+      const tag = String(lang).toLowerCase();
+      if (tag.startsWith('zh')) return 'zh';
+      if (tag.startsWith('ru')) return 'ru';
+      return 'en';
     }
 
     async function api(path, options) {
@@ -457,20 +627,20 @@ window.__ModuleLoader__.load({
       return out.slice(0, 240);
     }
 
+    // Sidebar glyph for the chosen icon: the same puzzle silhouette as icon.svg,
+    // drawn solid so it survives 16 px. The notch is part of the outline path, so
+    // the shape needs no mask and works on any sidebar background.
+    const PANEL_PUZZLE_PATH =
+      'M8.2 8A2.5 2.5 0 0 1 13.2 8H16A2 2 0 0 1 18 10V11.2A2 2 0 0 0 18 15.2V18A2 2 0 0 1 16 20H8A2 2 0 0 1 6 18V10A2 2 0 0 1 8 8Z';
+    const PANEL_SPARK_POINTS = '20.3 1.6 21.1 3.4 22.9 4.2 21.1 5 20.3 6.8 19.5 5 17.7 4.2 19.5 3.4';
+
     function PanelIcon(props) {
       const size = typeof props.size === 'number' ? props.size : 16;
       return h(
         'svg',
         { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },
-        h('path', {
-          d: 'M11 3.6l1.7 4.6 4.6 1.7-4.6 1.7L11 16.2 9.3 11.6 4.7 9.9l4.6-1.7L11 3.6z',
-          fill: 'currentColor',
-        }),
-        h('path', {
-          d: 'M18.2 14.4l1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1 1-2.8z',
-          fill: 'currentColor',
-          opacity: 0.6,
-        }),
+        h('path', { d: PANEL_PUZZLE_PATH, fill: 'currentColor' }),
+        h('polygon', { points: PANEL_SPARK_POINTS, fill: 'currentColor', opacity: 0.75 }),
       );
     }
 
@@ -478,6 +648,17 @@ window.__ModuleLoader__.load({
       const key = `source_${String(source).replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`;
       const label = t(key);
       return typeof label === 'string' && label !== key ? label : String(source);
+    }
+
+    // Catalog content ships in Russian and English: Russian for the Russian UI,
+    // English for every other language.
+    function catalogText(entry) {
+      if (!entry) return { title: '', description: '' };
+      if (uiLang() === 'ru') return { title: entry.title, description: entry.description };
+      return {
+        title: entry.titleEn || entry.title,
+        description: entry.descriptionEn || entry.description,
+      };
     }
 
     function categoryLabel(t, id, categories) {
@@ -557,6 +738,10 @@ window.__ModuleLoader__.load({
         const [groupTask, setGroupTask] = React.useState('');
         const [groups, setGroups] = React.useState(null);
         const [grouping, setGrouping] = React.useState(false);
+        // null — the inline "new category" row is closed; a string is its input value.
+        // A window.prompt would be the obvious control here, but the DSH Web client
+        // runs in Electron, where prompt() is unavailable and the click would do nothing.
+        const [categoryDraft, setCategoryDraft] = React.useState(null);
 
         const loadSkills = React.useCallback(async (cwd) => {
           setSkillsState({ status: 'loading' });
@@ -612,6 +797,7 @@ window.__ModuleLoader__.load({
 
         const openCreate = () => {
           setTab('installed');
+          setCategoryDraft(null);
           setEditor({
             mode: 'create',
             scope: 'project',
@@ -626,6 +812,7 @@ window.__ModuleLoader__.load({
         };
 
         const openEdit = async (skill) => {
+          setCategoryDraft(null);
           setBusy(skill.name);
           try {
             const body = await api(`/skills?name=${encodeURIComponent(skill.name)}`);
@@ -682,6 +869,7 @@ window.__ModuleLoader__.load({
               setNotice({ kind: 'ok', text: t('saved') });
             }
             setEditor(null);
+            setCategoryDraft(null);
             await refresh();
           } catch (error) {
             setEditor((current) => ({
@@ -956,7 +1144,8 @@ window.__ModuleLoader__.load({
         };
 
         const createCategory = async (title) => {
-          const created = await api('/categories', {
+          const cwd = pathDraft.trim();
+          const created = await api(`/categories${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ title }),
@@ -965,12 +1154,19 @@ window.__ModuleLoader__.load({
           return created.id;
         };
 
-        const createCategoryPrompt = async () => {
-          const title = window.prompt(t('newCategoryPrompt'));
-          if (!title || title.trim() === '') return;
+        const openCategoryPrompt = () => {
+          if (!editor) return;
+          setEditor((current) => (current ? Object.assign({}, current, { error: null }) : current));
+          setCategoryDraft('');
+        };
+
+        const submitCategory = async () => {
+          const title = typeof categoryDraft === 'string' ? categoryDraft.trim() : '';
+          if (title === '') return;
           try {
-            const id = await createCategory(title.trim());
+            const id = await createCategory(title);
             setEditor((current) => (current ? Object.assign({}, current, { category: id }) : current));
+            setCategoryDraft(null);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setEditor((current) => (current ? Object.assign({}, current, { error: message }) : current));
@@ -980,7 +1176,8 @@ window.__ModuleLoader__.load({
         const suggestEditorCategory = async () => {
           if (!editor) return;
           try {
-            const suggestion = await api('/suggest-category', {
+            const cwd = pathDraft.trim();
+            const suggestion = await api(`/suggest-category${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ name: editor.name, description: editor.description, content: editor.content, lang: uiLang() }),
@@ -989,9 +1186,10 @@ window.__ModuleLoader__.load({
               setEditor((current) => (current ? Object.assign({}, current, { category: suggestion.categoryId }) : current));
               return;
             }
-            if (suggestion.newTitle && window.confirm(`${t('createCategoryConfirm')} «${suggestion.newTitle}»?`)) {
-              const id = await createCategory(suggestion.newTitle);
-              setEditor((current) => (current ? Object.assign({}, current, { category: id }) : current));
+            if (suggestion.newTitle) {
+              // Confirm through the inline row instead of window.confirm so the
+              // suggestion stays editable and never depends on Electron dialogs.
+              setCategoryDraft(suggestion.newTitle);
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1267,7 +1465,7 @@ window.__ModuleLoader__.load({
               { style: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' } },
               h(
                 'button',
-                { style: Object.assign({}, styles.button, styles.small), onClick: createCategoryPrompt },
+                { style: Object.assign({}, styles.button, styles.small), onClick: openCategoryPrompt },
                 `+ ${t('newCategory')}`,
               ),
               h(
@@ -1276,6 +1474,42 @@ window.__ModuleLoader__.load({
                 t('suggestCategory'),
               ),
             ),
+            categoryDraft !== null
+              ? h(
+                  'div',
+                  { style: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' } },
+                  h('input', {
+                    style: Object.assign({}, styles.input, { flex: '1 1 200px', minWidth: 160 }),
+                    value: categoryDraft,
+                    placeholder: t('newCategoryPrompt'),
+                    autoFocus: true,
+                    spellCheck: false,
+                    onChange: (event) => setCategoryDraft(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        submitCategory();
+                      } else if (event.key === 'Escape') {
+                        setCategoryDraft(null);
+                      }
+                    },
+                  }),
+                  h(
+                    'button',
+                    {
+                      style: Object.assign({}, styles.button, styles.small, styles.primary),
+                      disabled: categoryDraft.trim() === '',
+                      onClick: submitCategory,
+                    },
+                    t('createCategoryConfirm'),
+                  ),
+                  h(
+                    'button',
+                    { style: Object.assign({}, styles.button, styles.small), onClick: () => setCategoryDraft(null) },
+                    t('cancel'),
+                  ),
+                )
+              : null,
             h(
               'label',
               { style: styles.field },
@@ -1283,6 +1517,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 style: Object.assign({}, styles.input, { width: '100%' }),
                 value: editor.description,
+                placeholder: t('descriptionPlaceholder'),
                 maxLength: 200,
                 onChange: (event) => setEditor({ ...editor, description: event.target.value }),
               }),
@@ -1314,7 +1549,13 @@ window.__ModuleLoader__.load({
               { style: styles.formActions },
               h(
                 'button',
-                { style: Object.assign({}, styles.button, styles.small), onClick: () => setEditor(null) },
+                {
+                  style: Object.assign({}, styles.button, styles.small),
+                  onClick: () => {
+                    setCategoryDraft(null);
+                    setEditor(null);
+                  },
+                },
                 t('cancel'),
               ),
               h(
@@ -1666,13 +1907,14 @@ window.__ModuleLoader__.load({
             catalog.categories.map((category) => {
               const entries = catalog.skills.filter((entry) => entry.category === category.id);
               const missing = entries.filter((entry) => !entry.installed);
+              const heading = catalogText(category).title;
               return h(
                 'div',
                 { key: category.id },
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
-                  h('div', { style: styles.sectionTitle }, `${category.title} · ${entries.length}`),
+                  h('div', { style: styles.sectionTitle }, `${heading} · ${entries.length}`),
                   missing.length > 0
                     ? h(
                         'button',
@@ -1681,7 +1923,8 @@ window.__ModuleLoader__.load({
                           disabled: busy === missing.map((entry) => entry.id).join(','),
                           onClick: () => {
                             const delta = missing.reduce(
-                              (sum, entry) => sum + Math.ceil((entry.name.length + entry.description.length) / 4),
+                              (sum, entry) =>
+                                sum + Math.ceil((entry.name.length + catalogText(entry).description.length) / 4),
                               0,
                             );
                             if (!window.confirm(`${t('installAll')}: ${missing.length} · ~+${delta} ${t('tokens')}`)) return;
@@ -1695,15 +1938,16 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: styles.list },
-                  entries.map((entry) =>
-                    h(
+                  entries.map((entry) => {
+                    const text = catalogText(entry);
+                    return h(
                       'div',
                       { key: entry.id, style: styles.row },
                       h(
                         'div',
                         { style: styles.rowMain },
-                        h('div', { style: styles.name }, entry.title),
-                        h('div', { style: styles.description }, entry.description),
+                        h('div', { style: styles.name }, text.title),
+                        h('div', { style: styles.description }, text.description),
                         h('div', { style: Object.assign({}, styles.note, styles.mono) }, entry.name),
                       ),
                       h(
@@ -1722,8 +1966,8 @@ window.__ModuleLoader__.load({
                               busy === entry.id ? t('installing') : t('install'),
                             ),
                       ),
-                    ),
-                  ),
+                    );
+                  }),
                 ),
               );
             }),
@@ -1812,7 +2056,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register(NS, { ru: RU, en: EN }), 'create-skills: dictionaries');
+        ctx.effect(() => ctx.locale.register(NS, { ru: RU, zh: ZH, en: EN }), 'create-skills: dictionaries');
 
         // Rebind the translator on every locale change: `tr` keeps calling the
         // current binding, and the page subscribes below to re-render.

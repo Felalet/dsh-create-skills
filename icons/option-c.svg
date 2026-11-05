@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Create Skills">
+  <defs>
+    <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d5efc"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#gc)"/>
+  <g>
+    <rect x="18" y="18" width="28" height="28" rx="5" fill="#ffffff"/>
+    <circle cx="32" cy="18" r="7" fill="#ffffff"/>
+    <circle cx="46" cy="32" r="6.5" fill="#5e52f1"/>
+    <polygon points="52.00,10.00 53.20,13.80 57.00,15.00 53.20,16.20 52.00,20.00 50.80,16.20 47.00,15.00 50.80,13.80" fill="#ffffff" opacity="0.85"/>
+  </g>
+</svg>
