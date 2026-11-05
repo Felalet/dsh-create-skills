@@ -31,6 +31,8 @@ window.__ModuleLoader__.load({
       skills: 'скиллов',
       incomplete: 'Каталог неполный: часть провайдеров не ответила.',
       estimate: 'Вес — оценка по длине имени и описания.',
+      budgetOver: 'Каталог большой',
+      budgetHint: 'Выключите лишние скиллы: они останутся доступны по /имя, но исчезнут из промпта модели.',
       readOnly: 'только чтение',
       edit: 'Править',
       save: 'Сохранить',
@@ -89,6 +91,8 @@ window.__ModuleLoader__.load({
       skills: 'skills',
       incomplete: 'Catalog is incomplete: some providers did not answer.',
       estimate: 'Weight is estimated from the name and description length.',
+      budgetOver: 'Catalog is large',
+      budgetHint: 'Disable rarely used skills: they stay available via /name but leave the model prompt.',
       readOnly: 'read-only',
       edit: 'Edit',
       save: 'Save',
@@ -651,6 +655,7 @@ window.__ModuleLoader__.load({
               h('div', { style: styles.emptyHint }, t('emptyHint')),
             );
           }
+          const budget = data.totalWeight + (data.catalogOverhead || 0);
           return h(
             'div',
             null,
@@ -658,9 +663,16 @@ window.__ModuleLoader__.load({
               'div',
               { style: styles.summary },
               h('span', { style: styles.chip }, `${data.skills.length} ${t('skills')}`),
-              h('span', { style: styles.chip }, `~${data.totalWeight + (data.catalogOverhead || 0)} ${t('tokens')}`),
+              h('span', { style: styles.chip }, `~${budget} ${t('tokens')}`),
               data.complete === false ? h('span', { style: Object.assign({}, styles.chip, styles.warn) }, t('incomplete')) : null,
             ),
+            budget > 1200
+              ? h(
+                  'div',
+                  { style: styles.noticeError },
+                  `${t('budgetOver')}: ~${budget} ${t('tokens')}. ${t('budgetHint')}`,
+                )
+              : null,
             h(
               'div',
               { style: styles.list },
@@ -776,7 +788,14 @@ window.__ModuleLoader__.load({
                         {
                           style: Object.assign({}, styles.button, styles.small),
                           disabled: busy === missing.map((entry) => entry.id).join(','),
-                          onClick: () => install(missing.map((entry) => entry.id)),
+                          onClick: () => {
+                            const delta = missing.reduce(
+                              (sum, entry) => sum + Math.ceil((entry.name.length + entry.description.length) / 4),
+                              0,
+                            );
+                            if (!window.confirm(`${t('installAll')}: ${missing.length} · ~+${delta} ${t('tokens')}`)) return;
+                            install(missing.map((entry) => entry.id));
+                          },
                         },
                         t('installAll'),
                       )
