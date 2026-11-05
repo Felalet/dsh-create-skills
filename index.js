@@ -1066,6 +1066,23 @@ async function sessionPath(ctx, url, res) {
   sendJson(res, 200, { path: typeof cwd === 'string' && cwd !== '' ? cwd : null });
 }
 
+// Both copies of a same-named skill, so the client can say whether the new one
+// actually differs and show the change summary before replacing.
+async function conflictInfo(view, body, res) {
+  const name = typeof body.name === 'string' ? body.name : '';
+  validateName(name);
+  const from = resolve(typeof body.from === 'string' ? body.from : '');
+  const projectRoot = await findProjectRoot(view.cwd);
+  const currentFile = join(projectRoot, '.dsh', 'skills', name, 'SKILL.md');
+  const incomingFile = join(from, '.dsh', 'skills', name, 'SKILL.md');
+  const [current, incoming] = await Promise.all([
+    readFile(currentFile, 'utf8').catch(() => null),
+    readFile(incomingFile, 'utf8').catch(() => null),
+  ]);
+  if (current === null || incoming === null) throw new HttpError(404, `skill "${name}" has no SKILL.md on one side`);
+  sendJson(res, 200, { same: current === incoming, current, incoming });
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1819,6 +1836,23 @@ export function apply(ctx) {
             return;
           }
           await listWorkspaceSkills(res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/skills/conflict`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await conflictInfo(view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }

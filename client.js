@@ -84,6 +84,11 @@ window.__ModuleLoader__.load({
       copiedHere: 'Скопировано',
       confirmReplace: 'Заменить здешний скилл версией из другой области',
       confirmReplaceSome: 'Заменить существующие скиллы новыми версиями',
+      sameSkillSkipped: 'Скилл не изменился — оставлен текущий',
+      replaceTitle: 'Заменить скилл',
+      replaceSummary: 'Изменения в новой версии',
+      keep: 'Оставить',
+      replace: 'Заменить',
       collectAll: 'Собрать со всех',
       collectDone: 'Собрано',
       skipped: 'пропущено',
@@ -258,6 +263,11 @@ window.__ModuleLoader__.load({
       copiedHere: 'Copied',
       confirmReplace: 'Replace the local skill with the version from another workspace',
       confirmReplaceSome: 'Replace the existing skills with the newer versions',
+      sameSkillSkipped: 'The skill is unchanged — the current one is kept',
+      replaceTitle: 'Replace skill',
+      replaceSummary: 'Changes in the new version',
+      keep: 'Keep',
+      replace: 'Replace',
       collectAll: 'Collect from all',
       collectDone: 'Collected',
       skipped: 'skipped',
@@ -432,6 +442,11 @@ window.__ModuleLoader__.load({
       copiedHere: '已复制',
       confirmReplace: '用其他工作区的版本替换本地技能',
       confirmReplaceSome: '用新版本替换已有技能',
+      sameSkillSkipped: '技能未变化——保留当前版本',
+      replaceTitle: '替换技能',
+      replaceSummary: '新版本中的变化',
+      keep: '保留',
+      replace: '替换',
       collectAll: '全部收集',
       collectDone: '已收集',
       skipped: '已跳过',
@@ -1017,6 +1032,8 @@ window.__ModuleLoader__.load({
         const [categoryDraft, setCategoryDraft] = React.useState(null);
         // Body of the last picked compare side, shown before a comparison runs.
         const [sidePreview, setSidePreview] = React.useState(null);
+        // Pending same-name replacement, with its change summary.
+        const [conflict, setConflict] = React.useState(null);
         // Feedback next to the "Choose" button, so an apply is visible in place.
         const [appliedNotice, setAppliedNotice] = React.useState(null);
         // The skill last opened in the editor; Compare picks it up on open.
@@ -1466,11 +1483,19 @@ window.__ModuleLoader__.load({
           setNotice({ kind: 'ok', text: `${t('loaded')}: ${workspace.title}` });
         };
 
+        const finishCopy = async (target, name) => {
+          setNotice({ kind: 'ok', text: `${t('copiedHere')}: ${name}` });
+          await loadSkills(target || undefined, true);
+          await loadCatalog(target || undefined);
+          const refreshed = await api('/workspace-skills').catch(() => null);
+          if (refreshed && Array.isArray(refreshed.workspaces)) setWorkspaceSkills(refreshed.workspaces);
+        };
+
         const copyHere = async (workspace, skill) => {
           const target = pathDraft.trim();
-          const url = `/skills/copy${target ? `?cwd=${encodeURIComponent(target)}` : ''}`;
+          const query = target ? `?cwd=${encodeURIComponent(target)}` : '';
           const send = (replace) =>
-            api(url, {
+            api(`/skills/copy${query}`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ name: skill.name, from: workspace.path, replace }),
@@ -1482,16 +1507,49 @@ window.__ModuleLoader__.load({
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
               if (!message.includes('already exists')) throw error;
-              // Same name here: keep the local skill or take the remote one;
-              // the replaced copy goes to the archive.
-              if (!window.confirm(`${t('confirmReplace')}: ${skill.name} (${workspace.title})?`)) return;
-              await send(true);
+              // Same name here: compare first. Identical copies are left alone;
+              // a different one opens the change summary before replacing.
+              const info = await api(`/skills/conflict${query}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ name: skill.name, from: workspace.path }),
+              });
+              if (info.same) {
+                setNotice({ kind: 'ok', text: `${t('sameSkillSkipped')}: ${skill.name}` });
+                return;
+              }
+              const ops = diffLines(info.current, info.incoming);
+              setConflict({
+                name: skill.name,
+                workspace: workspace.title,
+                from: workspace.path,
+                added: ops.filter((op) => op.type === 'add').length,
+                removed: ops.filter((op) => op.type === 'remove').length,
+                lines: ops.filter((op) => op.type !== 'same').slice(0, 40),
+              });
+              return;
             }
-            setNotice({ kind: 'ok', text: `${t('copiedHere')}: ${skill.name}` });
-            await loadSkills(target || undefined, true);
-            await loadCatalog(target || undefined);
-            const refreshed = await api('/workspace-skills').catch(() => null);
-            if (refreshed && Array.isArray(refreshed.workspaces)) setWorkspaceSkills(refreshed.workspaces);
+            await finishCopy(target, skill.name);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setBusy(null);
+          }
+        };
+
+        const applyConflictReplace = async () => {
+          if (!conflict) return;
+          const target = pathDraft.trim();
+          const name = conflict.name;
+          setBusy(`copy:${name}`);
+          try {
+            await api(`/skills/copy${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name, from: conflict.from, replace: true }),
+            });
+            setConflict(null);
+            await finishCopy(target, name);
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
           } finally {
@@ -2859,6 +2917,47 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const renderConflict = () => {
+          if (!conflict) return null;
+          return h(
+            'div',
+            {
+              style: styles.modalBackdrop,
+              role: 'presentation',
+              onClick: (event) => {
+                if (event.target === event.currentTarget) setConflict(null);
+              },
+            },
+            h(
+              'div',
+              { style: styles.modal, role: 'dialog', 'aria-modal': 'true' },
+              h('div', { style: styles.name }, `${t('replaceTitle')}: ${conflict.name}`),
+              h(
+                'div',
+                { style: styles.note },
+                `${t('replaceSummary')}: +${conflict.added} / -${conflict.removed} · ${conflict.workspace}`,
+              ),
+              h(
+                'pre',
+                { style: styles.pre },
+                conflict.lines
+                  .map((line) => `${line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '} ${line.text}`)
+                  .join('\n'),
+              ),
+              h(
+                'div',
+                { style: styles.formActions },
+                h('button', { style: styles.button, onClick: () => setConflict(null) }, t('keep')),
+                h(
+                  'button',
+                  { style: Object.assign({}, styles.button, styles.primary), onClick: applyConflictReplace },
+                  t('replace'),
+                ),
+              ),
+            ),
+          );
+        };
+
         const renderPreview = () => {
           if (!preview) return null;
           const entry = preview.entry;
@@ -3373,6 +3472,7 @@ window.__ModuleLoader__.load({
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
               : null,
             renderPreview(),
+            renderConflict(),
             editor ? renderEditor() : null,
             versions ? renderVersions() : null,
             tab === 'installed'
