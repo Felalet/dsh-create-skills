@@ -78,6 +78,11 @@ window.__ModuleLoader__.load({
       chooseRight: 'Выбрать правый',
       comparePick: 'Выберите скиллы слева и справа',
       verdictWinner: 'Лучше по оценке',
+      chooseAndDisable: 'Выбрать этот скилл и выключить второй',
+      otherReadOnly: 'Второй скилл встроенный — выключить его нельзя',
+      diffTitle: 'Различия',
+      sameText: 'Тексты совпадают',
+      backupSaved: 'бэкап',
       currentVersion: 'текущая',
       chosen: 'Выбрано',
       source_project_dsh: 'проект',
@@ -157,6 +162,11 @@ window.__ModuleLoader__.load({
       chooseRight: 'Choose right',
       comparePick: 'Pick a skill on both sides',
       verdictWinner: 'AI verdict',
+      chooseAndDisable: 'Choose this skill and disable the other',
+      otherReadOnly: 'The other skill is bundled and cannot be disabled',
+      diffTitle: 'Differences',
+      sameText: 'Texts are identical',
+      backupSaved: 'backup',
       currentVersion: 'current',
       chosen: 'Chosen',
       source_project_dsh: 'project',
@@ -326,6 +336,68 @@ window.__ModuleLoader__.load({
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
       return body;
+    }
+
+    // Minimal line diff: LCS over both bodies, then keep changes with two
+    // lines of context. Sized for SKILL.md files, not general-purpose diffs.
+    function diffLines(leftText, rightText) {
+      const a = leftText.split('\n');
+      const b = rightText.split('\n');
+      if (a.length > 800 || b.length > 800) {
+        return [{ type: 'gap', text: '…текст слишком большой для построчного сравнения…' }];
+      }
+      const n = a.length;
+      const m = b.length;
+      const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+      for (let i = n - 1; i >= 0; i -= 1) {
+        for (let j = m - 1; j >= 0; j -= 1) {
+          dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const ops = [];
+      let i = 0;
+      let j = 0;
+      while (i < n && j < m) {
+        if (a[i] === b[j]) {
+          ops.push({ type: 'same', text: a[i] });
+          i += 1;
+          j += 1;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          ops.push({ type: 'remove', text: a[i] });
+          i += 1;
+        } else {
+          ops.push({ type: 'add', text: b[j] });
+          j += 1;
+        }
+      }
+      while (i < n) {
+        ops.push({ type: 'remove', text: a[i] });
+        i += 1;
+      }
+      while (j < m) {
+        ops.push({ type: 'add', text: b[j] });
+        j += 1;
+      }
+
+      const keep = new Array(ops.length).fill(false);
+      for (let k = 0; k < ops.length; k += 1) {
+        if (ops[k].type === 'same') continue;
+        for (let c = Math.max(0, k - 2); c <= Math.min(ops.length - 1, k + 2); c += 1) keep[c] = true;
+      }
+      const out = [];
+      let skipped = false;
+      for (let k = 0; k < ops.length; k += 1) {
+        if (!keep[k]) {
+          skipped = true;
+          continue;
+        }
+        if (skipped) {
+          out.push({ type: 'gap', text: '…' });
+          skipped = false;
+        }
+        out.push(ops[k]);
+      }
+      return out.slice(0, 240);
     }
 
     function PanelIcon(props) {
@@ -596,12 +668,15 @@ window.__ModuleLoader__.load({
           if (!versions) return;
           if (!window.confirm(`${t('apply')} ${label}?`)) return;
           try {
-            await api('/versions/apply', {
+            const result = await api('/versions/apply', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ skill: versions.skill, label }),
             });
-            setNotice({ kind: 'ok', text: t('versionApplied') });
+            setNotice({
+              kind: 'ok',
+              text: result && result.backup ? `${t('versionApplied')} (${t('backupSaved')}: ${result.backup})` : t('versionApplied'),
+            });
             await refresh();
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
@@ -721,7 +796,32 @@ window.__ModuleLoader__.load({
             }
             return;
           }
-          setNotice({ kind: 'ok', text: `${t('chosen')}: ${pick.name}${pick.label ? ' / ' + pick.label : ''}` });
+          const otherName = side === 'left' ? compare.result.right.name : compare.result.left.name;
+          const pickSkill = data ? data.skills.find((skill) => skill.name === pick.name) : null;
+          const otherSkill = data ? data.skills.find((skill) => skill.name === otherName) : null;
+          if (!window.confirm(`${t('chooseAndDisable')} (${otherName})?`)) return;
+          try {
+            if (pickSkill && pickSkill.writable) {
+              await api('/skills', {
+                method: 'PATCH',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ name: pick.name, enabled: true }),
+              });
+            }
+            if (otherSkill && otherSkill.writable) {
+              await api('/skills', {
+                method: 'PATCH',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ name: otherName, enabled: false }),
+              });
+              setNotice({ kind: 'ok', text: `${t('chosen')}: ${pick.name} · ${otherName} — off` });
+            } else {
+              setNotice({ kind: 'error', text: t('otherReadOnly') });
+            }
+            await refresh();
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          }
         };
 
         const renderCompare = () => {
@@ -833,6 +933,41 @@ window.__ModuleLoader__.load({
                     column('left'),
                     column('right'),
                   ),
+                  result.left.body === result.right.body
+                    ? h('div', { style: styles.note }, t('sameText'))
+                    : h(
+                        'div',
+                        null,
+                        h('div', { style: styles.sectionTitle }, t('diffTitle')),
+                        h(
+                          'pre',
+                          {
+                            style: Object.assign({}, styles.textarea, {
+                              maxHeight: 360,
+                              overflow: 'auto',
+                              minHeight: 0,
+                              fontSize: 12,
+                            }),
+                          },
+                          diffLines(result.left.body, result.right.body).map((line, index) =>
+                            h(
+                              'div',
+                              {
+                                key: index,
+                                style: {
+                                  color:
+                                    line.type === 'remove'
+                                      ? 'var(--dsw-alias-state-error-primary)'
+                                      : line.type === 'add'
+                                        ? 'var(--dsw-alias-state-success-primary)'
+                                        : 'var(--dsw-alias-label-secondary)',
+                                },
+                              },
+                              `${line.type === 'remove' ? '-' : line.type === 'add' ? '+' : ' '} ${line.text}`,
+                            ),
+                          ),
+                        ),
+                      ),
                   h(
                     'div',
                     { style: styles.note },

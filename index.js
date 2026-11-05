@@ -557,8 +557,21 @@ async function applyVersion(ctx, view, body, res) {
   if (!(await exists(file))) throw new HttpError(404, `version "${label}" not found`);
   assertInside(found.path, allowedRoots(projectRoot));
   const raw = await readFile(file, 'utf8');
+  const current = await readFile(found.path, 'utf8');
+
+  // Never lose the state we are about to overwrite: snapshot it as an
+  // automatic version so "apply" is always reversible.
+  let backup = null;
+  if (current !== raw) {
+    backup = `auto-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+    const backupDir = join(versionsDir(projectRoot, skill), backup);
+    assertInside(backupDir, [join(projectRoot, '.dsh')]);
+    await mkdir(backupDir, { recursive: true });
+    await writeFile(join(backupDir, 'SKILL.md'), current, 'utf8');
+  }
+
   await writeFile(found.path, raw, 'utf8');
-  sendJson(res, 200, { ok: true, skill, label });
+  sendJson(res, 200, { ok: true, skill, label, backup });
 }
 
 async function removeVersion(ctx, url, res) {
