@@ -7,7 +7,7 @@
 // they do for the model.
 import process from 'node:process';
 import { homedir } from 'node:os';
-import { chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -530,6 +530,134 @@ async function deleteSkill(ctx, view, url, res) {
 function errorResponse(res, error) {
   const status = error instanceof HttpError ? error.status : 500;
   sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
+}
+
+// --- archive (trash) ------------------------------------------------------
+// Deleted skills move to `<dshHome>/skill-archive/<id>/` with a meta.json, so
+// they can be restored to the exact root they came from or deleted for good.
+function archiveRoot() {
+  return join(dshHome(), 'skill-archive');
+}
+
+function archiveEntryId(name) {
+  const slug = String(name).replace(/[^a-z0-9-]+/gi, '-').slice(0, 40);
+  return `${Date.now().toString(36)}-${slug}`;
+}
+
+async function movePath(from, to) {
+  await mkdir(dirname(to), { recursive: true });
+  try {
+    await rename(from, to);
+  } catch (error) {
+    // The archive may live on another volume than the project.
+    if (!error || error.code !== 'EXDEV') throw error;
+    await cp(from, to, { recursive: true });
+    await rm(from, { recursive: true, force: true });
+  }
+}
+
+async function archiveSkill(ctx, view, body, res) {
+  const name = typeof body.name === 'string' ? body.name : '';
+  if (name === '') throw new HttpError(400, 'name is required');
+  const snapshot = await readSnapshot(ctx, view);
+  const skill = await findWritable(snapshot, name);
+  const projectRoot = await findProjectRoot(view.cwd);
+  assertInside(skill.path, allowedRoots(projectRoot));
+
+  const skillFile = basename(skill.path) === 'SKILL.md' ? skill.path : join(skill.path, 'SKILL.md');
+  let category = '';
+  try {
+    category = parseCategory(splitFrontmatter(await readFile(skillFile, 'utf8')).frontmatter);
+  } catch {
+    // an unreadable definition still archives, just without a category
+  }
+
+  const target = basename(skill.path) === 'SKILL.md' ? dirname(skill.path) : skill.path;
+  const id = archiveEntryId(name);
+  const entryDir = join(archiveRoot(), id);
+  await mkdir(entryDir, { recursive: true });
+  const meta = {
+    id,
+    name,
+    source: skill.source,
+    category,
+    archivedAt: new Date().toISOString(),
+    origin: target,
+  };
+  await writeFile(join(entryDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  try {
+    await movePath(target, join(entryDir, 'skill'));
+  } catch (error) {
+    await rm(entryDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+  sendJson(res, 200, { ok: true, id, name, origin: target });
+}
+
+async function listArchive(res) {
+  const root = archiveRoot();
+  const ids = await readdir(root).catch(() => []);
+  const entries = [];
+  for (const id of ids) {
+    try {
+      const meta = JSON.parse(await readFile(join(root, id, 'meta.json'), 'utf8'));
+      if (!meta || typeof meta.name !== 'string') continue;
+      entries.push({
+        id,
+        name: meta.name,
+        category: typeof meta.category === 'string' ? meta.category : '',
+        source: typeof meta.source === 'string' ? meta.source : '',
+        archivedAt: meta.archivedAt ?? null,
+        origin: meta.origin ?? null,
+      });
+    } catch {
+      // a half-written entry is ignored rather than breaking the list
+    }
+  }
+  entries.sort((a, b) => String(b.archivedAt ?? '').localeCompare(String(a.archivedAt ?? '')));
+  sendJson(res, 200, { entries });
+}
+
+// Restoring may target a project other than the one currently open, so the
+// check is "looks like a skill root", not "inside this project's roots".
+function isSkillRootPath(path) {
+  const normalized = resolve(path);
+  if (isInsidePath(normalized, join(dshHome(), 'skills'))) return true;
+  if (isInsidePath(normalized, join(agentsHome(), 'skills'))) return true;
+  return /[\\/]\.(dsh|agents)[\\/]skills[\\/]/.test(normalized);
+}
+
+async function restoreArchive(view, body, res) {
+  const id = typeof body.id === 'string' ? body.id : '';
+  if (!/^[a-z0-9-]+$/i.test(id)) throw new HttpError(400, 'id is required');
+  const entryDir = join(archiveRoot(), id);
+  const meta = JSON.parse(await readFile(join(entryDir, 'meta.json'), 'utf8'));
+  if (!meta || typeof meta.origin !== 'string') throw new HttpError(422, 'archive entry is broken');
+  if (!isSkillRootPath(meta.origin)) throw new HttpError(403, 'archive entry points outside a skill root');
+  if (await exists(meta.origin)) {
+    throw new HttpError(409, `cannot restore: ${meta.origin} already exists`);
+  }
+  await movePath(join(entryDir, 'skill'), meta.origin);
+  await rm(entryDir, { recursive: true, force: true });
+  sendJson(res, 200, { ok: true, name: meta.name, origin: meta.origin });
+}
+
+async function deleteArchived(body, res) {
+  const id = typeof body.id === 'string' ? body.id : '';
+  if (!/^[a-z0-9-]+$/i.test(id)) throw new HttpError(400, 'id is required');
+  const entryDir = join(archiveRoot(), id);
+  if (!(await exists(entryDir))) throw new HttpError(404, 'archive entry not found');
+  await rm(entryDir, { recursive: true, force: true });
+  sendJson(res, 200, { ok: true });
+}
+
+async function emptyArchive(res) {
+  const root = archiveRoot();
+  const ids = await readdir(root).catch(() => []);
+  for (const id of ids) {
+    await rm(join(root, id), { recursive: true, force: true }).catch(() => {});
+  }
+  sendJson(res, 200, { ok: true, removed: ids.length });
 }
 
 function readTarString(header, offset, length) {
@@ -1321,6 +1449,74 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await groupByTask(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/archive`,
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          if (req.method === 'GET') {
+            await listArchive(res);
+            return;
+          }
+          if (req.method === 'POST') {
+            const view = await resolveView(ctx, url.searchParams.get('cwd'));
+            await archiveSkill(ctx, view, await readJsonBody(req), res);
+            return;
+          }
+          sendJson(res, 405, { error: 'method not allowed' });
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/archive/restore`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await restoreArchive(view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/archive/delete`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await deleteArchived(await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/archive/empty`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await emptyArchive(res);
         } catch (error) {
           errorResponse(res, error);
         }

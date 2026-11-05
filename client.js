@@ -87,6 +87,17 @@ window.__ModuleLoader__.load({
       installScope: 'Установить',
       previewSource: 'Источник',
       tabCompare: 'Сравнение',
+      tabArchive: 'Архив',
+      archiveEmpty: 'Архив пуст',
+      archiveHint: 'Удалённые скиллы лежат здесь, пока вы не восстановите или не удалите их навсегда.',
+      restore: 'Восстановить',
+      restoreDone: 'Восстановлено',
+      emptyArchive: 'Очистить архив',
+      confirmArchive: 'Переместить в архив',
+      confirmEmptyArchive: 'Очистить архив? Скиллы будут удалены безвозвратно.',
+      deletedForever: 'Удалено навсегда',
+      deleteForever: 'Удалить навсегда',
+      archiveDone: 'В архив',
       compareTask: 'Задача для сравнения (необязательно)',
       compareTaskPlaceholder: 'Например: подготовить квартальный отчёт с таблицей',
       runCompare: 'Сравнить',
@@ -218,6 +229,17 @@ window.__ModuleLoader__.load({
       installScope: 'Install to',
       previewSource: 'Source',
       tabCompare: 'Compare',
+      tabArchive: 'Archive',
+      archiveEmpty: 'The archive is empty',
+      archiveHint: 'Deleted skills stay here until you restore them or delete them permanently.',
+      restore: 'Restore',
+      restoreDone: 'Restored',
+      emptyArchive: 'Empty archive',
+      confirmArchive: 'Move to archive',
+      confirmEmptyArchive: 'Empty the archive? Skills will be deleted permanently.',
+      deletedForever: 'Deleted permanently',
+      deleteForever: 'Delete permanently',
+      archiveDone: 'Archived',
       compareTask: 'Task to compare on (optional)',
       compareTaskPlaceholder: 'For example: prepare a quarterly report with a table',
       runCompare: 'Compare',
@@ -349,6 +371,17 @@ window.__ModuleLoader__.load({
       installScope: '安装到',
       previewSource: '来源',
       tabCompare: '对比',
+      tabArchive: '回收站',
+      archiveEmpty: '回收站为空',
+      archiveHint: '已删除的技能会留在这里，直到您恢复或永久删除。',
+      restore: '恢复',
+      restoreDone: '已恢复',
+      emptyArchive: '清空回收站',
+      confirmArchive: '移到回收站',
+      confirmEmptyArchive: '清空回收站？技能将被永久删除。',
+      deletedForever: '已永久删除',
+      deleteForever: '永久删除',
+      archiveDone: '已移到回收站',
       compareTask: '用于对比的任务（可选）',
       compareTaskPlaceholder: '例如：准备一份带表格的季度报告',
       runCompare: '对比',
@@ -775,6 +808,7 @@ window.__ModuleLoader__.load({
         const [tab, setTab] = React.useState('installed');
         const [skillsState, setSkillsState] = React.useState({ status: 'loading' });
         const [catalogState, setCatalogState] = React.useState({ status: 'idle' });
+        const [archiveState, setArchiveState] = React.useState({ status: 'idle', entries: [] });
         const [pathDraft, setPathDraft] = React.useState('');
         const [editor, setEditor] = React.useState(null);
         const [busy, setBusy] = React.useState(null);
@@ -877,6 +911,21 @@ window.__ModuleLoader__.load({
         React.useEffect(() => {
           if (tab === 'catalog' && catalogState.status === 'idle') loadCatalog(pathDraft.trim() || undefined);
         }, [tab, catalogState.status, loadCatalog, pathDraft]);
+
+        const loadArchive = React.useCallback(async () => {
+          setArchiveState((current) => ({ status: 'loading', entries: current.entries }));
+          try {
+            const body = await api('/archive');
+            setArchiveState({ status: 'ready', entries: Array.isArray(body.entries) ? body.entries : [] });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setArchiveState({ status: 'error', entries: [], message });
+          }
+        }, []);
+
+        React.useEffect(() => {
+          if (tab === 'archive') loadArchive();
+        }, [tab, loadArchive]);
 
         React.useEffect(() => {
           if (!notice) return undefined;
@@ -1044,17 +1093,80 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const cwdQuery = () => {
+          const cwd = pathDraft.trim();
+          return cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+        };
+
+        // Deleting a skill moves it to the archive; the archive owns the only
+        // permanent delete, so a misclick stays recoverable.
         const removeSkill = async (skill) => {
-          if (!window.confirm(`${t('confirmDelete')} ${skill.name}?`)) return;
+          if (!window.confirm(`${t('confirmArchive')}: ${skill.name}?`)) return;
           setBusy(skill.name);
           try {
-            await api(`/skills?name=${encodeURIComponent(skill.name)}`, { method: 'DELETE' });
-            setNotice({ kind: 'ok', text: t('deleted') });
+            await api(`/archive${cwdQuery()}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name: skill.name }),
+            });
+            setNotice({ kind: 'ok', text: `${t('archiveDone')}: ${skill.name}` });
             await refresh();
+            await loadArchive();
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
           } finally {
             setBusy(null);
+          }
+        };
+
+        const restoreArchived = async (entry) => {
+          setBusy(entry.id);
+          try {
+            await api(`/archive/restore${cwdQuery()}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: entry.id }),
+            });
+            setNotice({ kind: 'ok', text: `${t('restoreDone')}: ${entry.name}` });
+            await loadArchive();
+            await loadSkills(pathDraft.trim() || undefined, true);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setBusy(null);
+          }
+        };
+
+        const deleteArchivedForever = async (entry) => {
+          if (!window.confirm(`${t('confirmDelete')} ${entry.name}?`)) return;
+          setBusy(entry.id);
+          try {
+            await api('/archive/delete', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: entry.id }),
+            });
+            setNotice({ kind: 'ok', text: `${t('deletedForever')}: ${entry.name}` });
+            await loadArchive();
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setBusy(null);
+          }
+        };
+
+        const emptyArchived = async () => {
+          if (!window.confirm(t('confirmEmptyArchive'))) return;
+          try {
+            const body = await api('/archive/empty', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: '{}',
+            });
+            setNotice({ kind: 'ok', text: `${t('deletedForever')}: ${body.removed}` });
+            await loadArchive();
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
           }
         };
 
@@ -1363,6 +1475,94 @@ window.__ModuleLoader__.load({
           } finally {
             setGrouping(false);
           }
+        };
+
+        const renderArchive = () => {
+          const entries = archiveState.entries || [];
+          const categories = data && data.categories ? data.categories : [];
+          const groups = new Map();
+          for (const entry of entries) {
+            const key = entry.category || '';
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(entry);
+          }
+          return h(
+            'div',
+            null,
+            h(
+              'div',
+              { style: styles.toolbar },
+              h('div', { style: styles.note }, t('archiveHint')),
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.button, styles.danger),
+                  disabled: entries.length === 0,
+                  onClick: emptyArchived,
+                },
+                t('emptyArchive'),
+              ),
+            ),
+            archiveState.status === 'error'
+              ? h('div', { style: styles.error }, archiveState.message)
+              : entries.length === 0
+                ? h('div', { style: styles.empty }, h('div', { style: styles.emptyTitle }, t('archiveEmpty')))
+                : Array.from(groups.entries()).map(([category, list]) =>
+                    h(
+                      'div',
+                      { key: category || 'none' },
+                      h(
+                        'div',
+                        { style: styles.sectionTitle },
+                        category ? categoryLabel(t, category, categories) : t('noCategory'),
+                      ),
+                      h(
+                        'div',
+                        { style: styles.list },
+                        list.map((entry) =>
+                          h(
+                            'div',
+                            { key: entry.id, style: styles.row },
+                            h(
+                              'div',
+                              { style: styles.rowMain },
+                              h('div', { style: styles.name }, entry.name),
+                              h(
+                                'div',
+                                { style: styles.description },
+                                `${entry.archivedAt ? new Date(entry.archivedAt).toLocaleString() : ''}${
+                                  entry.source ? ` · ${sourceLabel(t, entry.source)}` : ''
+                                }`,
+                              ),
+                            ),
+                            h(
+                              'div',
+                              { style: styles.rowSide },
+                              h(
+                                'button',
+                                {
+                                  style: Object.assign({}, styles.button, styles.small),
+                                  disabled: busy === entry.id,
+                                  onClick: () => restoreArchived(entry),
+                                },
+                                t('restore'),
+                              ),
+                              h(
+                                'button',
+                                {
+                                  style: Object.assign({}, styles.button, styles.small, styles.danger),
+                                  disabled: busy === entry.id,
+                                  onClick: () => deleteArchivedForever(entry),
+                                },
+                                t('deleteForever'),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+          );
         };
 
         const renderCompare = () => {
@@ -2288,6 +2488,14 @@ window.__ModuleLoader__.load({
                 },
                 t('tabCompare'),
               ),
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.tab, tab === 'archive' ? styles.tabActive : null),
+                  onClick: () => setTab('archive'),
+                },
+                t('tabArchive'),
+              ),
             ),
             notice
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
@@ -2295,7 +2503,13 @@ window.__ModuleLoader__.load({
             renderPreview(),
             tab === 'installed' ? (editor ? renderEditor() : null) : null,
             tab === 'installed' ? (versions ? renderVersions() : null) : null,
-            tab === 'installed' ? renderInstalled() : tab === 'catalog' ? renderCatalog() : renderCompare(),
+            tab === 'installed'
+              ? renderInstalled()
+              : tab === 'catalog'
+                ? renderCatalog()
+                : tab === 'archive'
+                  ? renderArchive()
+                  : renderCompare(),
           ),
         );
       };
