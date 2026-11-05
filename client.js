@@ -65,6 +65,8 @@ window.__ModuleLoader__.load({
       grouping: 'Раскладываем…',
       searchPlaceholder: 'Поиск по имени',
       nothingFound: 'Ничего не найдено',
+      allDisabled: 'Все скиллы отключены — включайте их в каталоге.',
+      hiddenSkills: 'отключено',
       scopeProject: 'в проект',
       scopeUser: 'в пользовательские',
       name: 'Имя (kebab-case)',
@@ -209,6 +211,8 @@ window.__ModuleLoader__.load({
       grouping: 'Grouping…',
       searchPlaceholder: 'Search by name',
       nothingFound: 'Nothing found',
+      allDisabled: 'Every skill is disabled — enable them in the catalog.',
+      hiddenSkills: 'disabled',
       scopeProject: 'project',
       scopeUser: 'user',
       name: 'Name (kebab-case)',
@@ -353,6 +357,8 @@ window.__ModuleLoader__.load({
       grouping: '正在分组…',
       searchPlaceholder: '按名称搜索',
       nothingFound: '未找到',
+      allDisabled: '所有技能均已停用——请在技能库中启用。',
+      hiddenSkills: '已停用',
       scopeProject: '项目内',
       scopeUser: '用户目录',
       name: '名称（kebab-case）',
@@ -2082,11 +2088,15 @@ window.__ModuleLoader__.load({
           }
           const budget = data.totalWeight + (data.catalogOverhead || 0);
           const term = skillSearch.trim().toLowerCase();
-          const filterCategories = categoriesWithSkills(data.skills, data.categories);
+          // Disabled skills are managed from the catalog, so the installed list
+          // shows only the ones the model currently sees.
+          const installedRows = data.skills.filter((skill) => skill.modelInvocable !== false);
+          const hiddenRows = data.skills.length - installedRows.length;
+          const filterCategories = categoriesWithSkills(installedRows, data.categories);
           const activeFilter = filterCategories.some((category) => category.id === skillCategory)
             ? skillCategory
             : '';
-          const visible = data.skills.filter((skill) => {
+          const visible = installedRows.filter((skill) => {
             const byCategory = !activeFilter || skill.category === activeFilter;
             const byName =
               term === '' ||
@@ -2096,7 +2106,7 @@ window.__ModuleLoader__.load({
           });
 
           const renderGrouped = () => {
-            const byName = new Map(data.skills.map((skill) => [skill.name, skill]));
+            const byName = new Map(installedRows.map((skill) => [skill.name, skill]));
             const used = new Set();
             const sections = groups
               .map((group) => {
@@ -2105,7 +2115,7 @@ window.__ModuleLoader__.load({
                 return { title: group.title, items };
               })
               .filter((section) => section.items.length > 0);
-            const rest = data.skills.filter((skill) => !used.has(skill.name));
+            const rest = installedRows.filter((skill) => !used.has(skill.name));
             if (rest.length > 0) sections.push({ title: t('groupOthers'), items: rest });
             return h(
               'div',
@@ -2195,7 +2205,10 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: styles.summary },
-              h('span', { style: styles.chip }, `${data.skills.length} ${t('skills')}`),
+              h('span', { style: styles.chip }, `${installedRows.length} ${t('skills')}`),
+              hiddenRows > 0
+                ? h('span', { style: styles.chip }, `${t('hiddenSkills')}: ${hiddenRows}`)
+                : null,
               h('span', { style: styles.chip }, `~${budget} ${t('tokens')}`),
               data.complete === false ? h('span', { style: Object.assign({}, styles.chip, styles.warn) }, t('incomplete')) : null,
             ),
@@ -2210,7 +2223,11 @@ window.__ModuleLoader__.load({
             groups && groups.length > 0
               ? null
               : visible.length === 0
-                ? h('div', { style: styles.note }, t('nothingFound'))
+                ? h(
+                    'div',
+                    { style: styles.note },
+                    installedRows.length === 0 ? t('allDisabled') : t('nothingFound'),
+                  )
                 : null,
             h(
               'div',
@@ -2251,15 +2268,6 @@ window.__ModuleLoader__.load({
                               onClick: () => openEdit(skill),
                             },
                             t('edit'),
-                          ),
-                          h(
-                            'button',
-                            {
-                              style: Object.assign({}, styles.button, styles.small),
-                              disabled: busy === skill.name,
-                              onClick: () => toggleSkill(skill),
-                            },
-                            skill.modelInvocable ? t('disable') : t('enable'),
                           ),
                         )
                       : null,
