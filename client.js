@@ -815,8 +815,8 @@ window.__ModuleLoader__.load({
         const [notice, setNotice] = React.useState(null);
         const [versions, setVersions] = React.useState(null);
         const [compare, setCompare] = React.useState({
-          left: { category: '', skill: '', label: '' },
-          right: { category: '', skill: '', label: '' },
+          left: { category: '', skill: '', catalogId: '', label: '' },
+          right: { category: '', skill: '', catalogId: '', label: '' },
           task: '',
           busy: false,
           error: null,
@@ -909,7 +909,9 @@ window.__ModuleLoader__.load({
         }, []);
 
         React.useEffect(() => {
-          if (tab === 'catalog' && catalogState.status === 'idle') loadCatalog(pathDraft.trim() || undefined);
+          if ((tab === 'catalog' || tab === 'compare') && catalogState.status === 'idle') {
+            loadCatalog(pathDraft.trim() || undefined);
+          }
         }, [tab, catalogState.status, loadCatalog, pathDraft]);
 
         const loadArchive = React.useCallback(async () => {
@@ -1292,7 +1294,9 @@ window.__ModuleLoader__.load({
             }
             return next;
           });
-          if (patch.skill !== undefined && patch.skill !== '') loadCompareVersions(side, patch.skill);
+          if (patch.skill !== undefined && patch.skill !== '' && !patch.catalogId) {
+            loadCompareVersions(side, patch.skill);
+          }
         };
 
         const runCompare = async (leftSpec, rightSpec) => {
@@ -1308,8 +1312,8 @@ window.__ModuleLoader__.load({
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
-                left: { name: left.skill, label: left.label || undefined },
-                right: { name: right.skill, label: right.label || undefined },
+                left: { name: left.skill, catalogId: left.catalogId || undefined, label: left.label || undefined },
+                right: { name: right.skill, catalogId: right.catalogId || undefined, label: right.label || undefined },
                 task: compare.task,
                 lang: uiLang(),
               }),
@@ -1568,16 +1572,40 @@ window.__ModuleLoader__.load({
         const renderCompare = () => {
           const skills = data ? data.skills : [];
           const categories = data && data.categories ? data.categories : [];
+          const catalogEntries = catalog && Array.isArray(catalog.skills) ? catalog.skills : [];
+          const installedNames = new Set(skills.map((skill) => skill.name));
+          // Both sides offer installed skills and catalog entries, so a skill can
+          // be compared before it is installed. Catalog rows carry their id.
+          const compareItems = skills
+            .map((skill) => ({
+              key: skill.name,
+              name: skill.name,
+              category: skill.category || '',
+              catalogId: '',
+              label: skill.name,
+            }))
+            .concat(
+              catalogEntries
+                .filter((entry) => !installedNames.has(entry.name))
+                .map((entry) => ({
+                  key: `catalog:${entry.id}`,
+                  name: entry.name,
+                  category: entry.category || '',
+                  catalogId: entry.id,
+                  label: `${catalogText(entry).title} · ${t('tabCatalog')}`,
+                })),
+            );
           const sideCard = (side, title) => {
             const sideState = compare[side];
             const sideVersions = compare.versions[side] || [];
-            const sideCategories = categoriesWithSkills(skills, categories);
+            const sideCategories = categoriesWithSkills(compareItems, categories);
             const activeCategory = sideCategories.some((category) => category.id === sideState.category)
               ? sideState.category
               : '';
-            const visibleSkills = skills.filter(
-              (skill) => !activeCategory || skill.category === activeCategory,
+            const visibleItems = compareItems.filter(
+              (item) => !activeCategory || item.category === activeCategory,
             );
+            const selectedKey = sideState.catalogId ? `catalog:${sideState.catalogId}` : sideState.skill;
             return h(
               'div',
               { style: Object.assign({}, styles.form, { flex: '1 1 320px', marginTop: 0 }) },
@@ -1588,7 +1616,7 @@ window.__ModuleLoader__.load({
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
                   value: activeCategory,
                   onChange: (event) =>
-                    setCompareSide(side, { category: event.target.value, skill: '', label: '' }),
+                    setCompareSide(side, { category: event.target.value, skill: '', catalogId: '', label: '' }),
                 },
                 h('option', { value: '' }, t('allCategories')),
                 sideCategories.map((category) =>
@@ -1603,21 +1631,31 @@ window.__ModuleLoader__.load({
                 'select',
                 {
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
-                  value: sideState.skill,
-                  onChange: (event) => setCompareSide(side, { skill: event.target.value, label: '' }),
+                  value: selectedKey,
+                  onChange: (event) => {
+                    const picked = visibleItems.find((item) => item.key === event.target.value);
+                    setCompareSide(side, {
+                      skill: picked ? picked.name : '',
+                      catalogId: picked ? picked.catalogId : '',
+                      label: '',
+                    });
+                  },
                 },
-                h('option', { value: '' }, visibleSkills.length === 0 ? t('nothingFound') : '—'),
-                visibleSkills.map((skill) => h('option', { key: skill.name, value: skill.name }, skill.name)),
+                h('option', { value: '' }, visibleItems.length === 0 ? t('nothingFound') : '—'),
+                visibleItems.map((item) => h('option', { key: item.key, value: item.key }, item.label)),
               ),
               h(
                 'select',
                 {
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
                   value: sideState.label,
+                  disabled: Boolean(sideState.catalogId),
                   onChange: (event) => setCompareSide(side, { label: event.target.value }),
                 },
                 h('option', { value: '' }, t('currentVersion')),
-                sideVersions.map((version) => h('option', { key: version.label, value: version.label }, version.label)),
+                sideState.catalogId
+                  ? null
+                  : sideVersions.map((version) => h('option', { key: version.label, value: version.label }, version.label)),
               ),
             );
           };

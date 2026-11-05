@@ -809,11 +809,10 @@ async function installCatalogSkills(ctx, view, body, res) {
 const previewCache = new Map();
 const MAX_PREVIEW_BYTES = 512 * 1024;
 
-// A catalog entry points at a skill directory inside a repository, so the
-// preview fetches just SKILL.md over HTTPS instead of the whole archive.
-async function previewCatalogEntry(url, res) {
-  const id = url.searchParams.get('id');
-  if (!id) throw new HttpError(400, 'id is required');
+// A catalog entry points at a skill directory inside a repository, so both the
+// preview and the comparison fetch just SKILL.md over HTTPS, then cache it.
+async function fetchCatalogEntry(id) {
+  if (typeof id !== 'string' || id === '') throw new HttpError(400, 'id is required');
   const catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
   const entry = catalog.skills.find((candidate) => candidate.id === id);
   if (!entry) throw new HttpError(404, `catalog entry "${id}" not found`);
@@ -831,7 +830,11 @@ async function previewCatalogEntry(url, res) {
     cached = { raw, content: buffer.toString('utf8') };
     previewCache.set(entry.id, cached);
   }
+  return { entry, raw: cached.raw, content: cached.content };
+}
 
+async function previewCatalogEntry(url, res) {
+  const { entry, raw, content } = await fetchCatalogEntry(url.searchParams.get('id'));
   sendJson(res, 200, {
     id: entry.id,
     name: entry.name,
@@ -842,8 +845,8 @@ async function previewCatalogEntry(url, res) {
     category: entry.category,
     license: entry.license ?? null,
     source: entry.source,
-    rawUrl: cached.raw,
-    content: cached.content,
+    rawUrl: raw,
+    content,
   });
 }
 
@@ -940,6 +943,12 @@ async function removeVersion(ctx, url, res) {
 }
 
 async function readVariant(ctx, view, spec) {
+  // A catalog side is compared from its repository copy, so a skill can be
+  // compared before it is installed.
+  if (spec && typeof spec.catalogId === 'string' && spec.catalogId !== '') {
+    const { entry, content } = await fetchCatalogEntry(spec.catalogId);
+    return { name: entry.name, label: null, raw: content, body: splitFrontmatter(content).body };
+  }
   if (!spec || typeof spec.name !== 'string') throw new HttpError(400, 'skill name is required for each side');
   validateName(spec.name);
   if (spec.label) {
