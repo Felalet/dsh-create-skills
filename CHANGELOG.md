@@ -39,4 +39,4 @@ First public release.
 - The catalog is not vendored: skills are downloaded from their upstream
   repositories on demand.
 
-[0.1.0]: https://github.com/<owner>/dsh-create-skills/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Felalet/dsh-create-skills/releases/tag/v0.1.0

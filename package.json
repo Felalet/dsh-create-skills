@@ -6,6 +6,14 @@
   "description": "DSH plugin: skills catalog with preview, editor, versions, archive (trash) and A/B comparison with AI improvement.",
   "license": "MIT",
   "author": "VladSparrow",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Felalet/dsh-create-skills.git"
+  },
+  "homepage": "https://github.com/Felalet/dsh-create-skills#readme",
+  "bugs": {
+    "url": "https://github.com/Felalet/dsh-create-skills/issues"
+  },
   "main": "index.js",
   "exports": {
     ".": "./index.js",

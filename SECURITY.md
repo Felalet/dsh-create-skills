@@ -11,7 +11,7 @@
 
 Please **do not open a public issue**. Use GitHub's private reporting:
 **Security → Report a vulnerability** in this repository
-(<https://github.com/<owner>/dsh-create-skills/security/advisories/new>).
+(<https://github.com/Felalet/dsh-create-skills/security/advisories/new>).
 
 Include:
 
