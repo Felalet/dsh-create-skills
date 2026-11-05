@@ -7,7 +7,7 @@
 // they do for the model.
 import process from 'node:process';
 import { homedir } from 'node:os';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -494,6 +494,85 @@ async function installCatalogSkills(ctx, view, body, res) {
   });
 }
 
+function safeLabel(label) {
+  const value = String(label ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  if (value === '') throw new HttpError(400, 'label is required (a-z, 0-9, dot, dash, underscore)');
+  return value;
+}
+
+function versionsDir(projectRoot, skill) {
+  return join(projectRoot, '.dsh', 'skill-versions', skill);
+}
+
+async function listVersions(ctx, url, res) {
+  const skill = url.searchParams.get('skill');
+  validateName(skill);
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const projectRoot = await findProjectRoot(view.cwd);
+  const dir = versionsDir(projectRoot, skill);
+  const labels = await readdir(dir).catch(() => []);
+  const versions = [];
+  for (const label of labels) {
+    try {
+      const info = await stat(join(dir, label, 'SKILL.md'));
+      if (!info.isFile()) continue;
+      versions.push({ label, savedAt: info.mtime.toISOString(), bytes: info.size });
+    } catch {
+      // not a version directory
+    }
+  }
+  versions.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  sendJson(res, 200, { skill, versions });
+}
+
+async function saveVersion(ctx, view, body, res) {
+  const skill = body.skill;
+  validateName(skill);
+  const label = safeLabel(body.label);
+  const snapshot = await readSnapshot(ctx, view);
+  const found = await findWritable(snapshot, skill);
+  const projectRoot = await findProjectRoot(view.cwd);
+  const dir = join(versionsDir(projectRoot, skill), label);
+  assertInside(dir, [join(projectRoot, '.dsh')]);
+  const raw = await readFile(found.path, 'utf8');
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'SKILL.md'), raw, 'utf8');
+  sendJson(res, 201, { ok: true, skill, label, path: join(dir, 'SKILL.md') });
+}
+
+async function applyVersion(ctx, view, body, res) {
+  const skill = body.skill;
+  validateName(skill);
+  const label = safeLabel(body.label);
+  const snapshot = await readSnapshot(ctx, view);
+  const found = await findWritable(snapshot, skill);
+  const projectRoot = await findProjectRoot(view.cwd);
+  const file = join(versionsDir(projectRoot, skill), label, 'SKILL.md');
+  assertInside(file, [join(projectRoot, '.dsh')]);
+  if (!(await exists(file))) throw new HttpError(404, `version "${label}" not found`);
+  assertInside(found.path, allowedRoots(projectRoot));
+  const raw = await readFile(file, 'utf8');
+  await writeFile(found.path, raw, 'utf8');
+  sendJson(res, 200, { ok: true, skill, label });
+}
+
+async function removeVersion(ctx, url, res) {
+  const skill = url.searchParams.get('skill');
+  validateName(skill);
+  const label = safeLabel(url.searchParams.get('label'));
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const projectRoot = await findProjectRoot(view.cwd);
+  const dir = join(versionsDir(projectRoot, skill), label);
+  assertInside(dir, [join(projectRoot, '.dsh')]);
+  await rm(dir, { recursive: true, force: true });
+  sendJson(res, 200, { ok: true });
+}
+
 export function apply(ctx) {
   const routes = [
     {
@@ -554,6 +633,48 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await installCatalogSkills(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/versions`,
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          if (req.method === 'GET') {
+            await listVersions(ctx, url, res);
+            return;
+          }
+          if (req.method === 'POST') {
+            await saveVersion(ctx, view, await readJsonBody(req), res);
+            return;
+          }
+          if (req.method === 'DELETE') {
+            await removeVersion(ctx, url, res);
+            return;
+          }
+          sendJson(res, 405, { error: 'method not allowed' });
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/versions/apply`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await applyVersion(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }

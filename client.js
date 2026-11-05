@@ -33,6 +33,14 @@ window.__ModuleLoader__.load({
       estimate: 'Вес — оценка по длине имени и описания.',
       budgetOver: 'Каталог большой',
       budgetHint: 'Выключите лишние скиллы: они останутся доступны по /имя, но исчезнут из промпта модели.',
+      versions: 'Версии',
+      saveVersion: 'Сохранить версию',
+      versionLabel: 'Метка версии',
+      noVersions: 'Версий пока нет',
+      versionSaved: 'Версия сохранена',
+      versionApplied: 'Версия применена',
+      close: 'Закрыть',
+      apply: 'Применить',
       readOnly: 'только чтение',
       edit: 'Править',
       save: 'Сохранить',
@@ -93,6 +101,14 @@ window.__ModuleLoader__.load({
       estimate: 'Weight is estimated from the name and description length.',
       budgetOver: 'Catalog is large',
       budgetHint: 'Disable rarely used skills: they stay available via /name but leave the model prompt.',
+      versions: 'Versions',
+      saveVersion: 'Save version',
+      versionLabel: 'Version label',
+      noVersions: 'No versions yet',
+      versionSaved: 'Version saved',
+      versionApplied: 'Version applied',
+      close: 'Close',
+      apply: 'Apply',
       readOnly: 'read-only',
       edit: 'Edit',
       save: 'Save',
@@ -347,6 +363,7 @@ window.__ModuleLoader__.load({
         const [editor, setEditor] = React.useState(null);
         const [busy, setBusy] = React.useState(null);
         const [notice, setNotice] = React.useState(null);
+        const [versions, setVersions] = React.useState(null);
         const [installScope, setInstallScope] = React.useState('project');
 
         const loadSkills = React.useCallback(async (cwd) => {
@@ -510,6 +527,67 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const openVersions = async (skill) => {
+          setVersions({ skill: skill.name, status: 'loading', list: [], label: '', error: null });
+          try {
+            const body = await api(`/versions?skill=${encodeURIComponent(skill.name)}`);
+            setVersions((current) =>
+              current && current.skill === skill.name ? Object.assign({}, current, { status: 'ready', list: body.versions }) : current,
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setVersions((current) => Object.assign({}, current, { status: 'error', error: message }));
+          }
+        };
+
+        const saveVersionNow = async () => {
+          if (!versions) return;
+          const label = versions.label.trim();
+          if (label === '') {
+            setVersions(Object.assign({}, versions, { error: t('versionLabel') }));
+            return;
+          }
+          try {
+            await api('/versions', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ skill: versions.skill, label }),
+            });
+            setNotice({ kind: 'ok', text: t('versionSaved') });
+            await openVersions({ name: versions.skill });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setVersions(Object.assign({}, versions, { error: message }));
+          }
+        };
+
+        const applyVersionNow = async (label) => {
+          if (!versions) return;
+          if (!window.confirm(`${t('apply')} ${label}?`)) return;
+          try {
+            await api('/versions/apply', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ skill: versions.skill, label }),
+            });
+            setNotice({ kind: 'ok', text: t('versionApplied') });
+            await refresh();
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          }
+        };
+
+        const removeVersionNow = async (label) => {
+          if (!versions) return;
+          if (!window.confirm(`${t('delete')} ${label}?`)) return;
+          try {
+            await api(`/versions?skill=${encodeURIComponent(versions.skill)}&label=${encodeURIComponent(label)}`, { method: 'DELETE' });
+            await openVersions({ name: versions.skill });
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          }
+        };
+
         const install = async (ids) => {
           if (ids.length === 0) {
             setNotice({ kind: 'error', text: t('allInstalled') });
@@ -633,6 +711,73 @@ window.__ModuleLoader__.load({
             ),
           );
 
+        const renderVersions = () => {
+          if (!versions) return null;
+          const rows = versions.list.map((version) =>
+            h(
+              'div',
+              {
+                key: version.label,
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  padding: '8px 10px',
+                  border: '1px solid var(--dsw-alias-border-l1)',
+                  borderRadius: 8,
+                },
+              },
+              h(
+                'div',
+                null,
+                h('div', { style: styles.name }, version.label),
+                h('div', { style: styles.note }, new Date(version.savedAt).toLocaleString()),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6 } },
+                h(
+                  'button',
+                  { style: Object.assign({}, styles.button, styles.small), onClick: () => applyVersionNow(version.label) },
+                  t('apply'),
+                ),
+                h(
+                  'button',
+                  { style: Object.assign({}, styles.button, styles.small, styles.danger), onClick: () => removeVersionNow(version.label) },
+                  t('delete'),
+                ),
+              ),
+            ),
+          );
+          return h(
+            'div',
+            { style: styles.form },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 } },
+              h('div', { style: styles.name }, `${t('versions')}: ${versions.skill}`),
+              h('button', { style: Object.assign({}, styles.button, styles.small), onClick: () => setVersions(null) }, t('close')),
+            ),
+            h(
+              'div',
+              { style: Object.assign({}, styles.formRow, { marginTop: 10 }) },
+              h('input', {
+                style: Object.assign({}, styles.input, { flex: '1 1 200px' }),
+                value: versions.label,
+                placeholder: t('versionLabel'),
+                spellCheck: false,
+                onChange: (event) => setVersions(Object.assign({}, versions, { label: event.target.value })),
+              }),
+              h('button', { style: Object.assign({}, styles.button, styles.small), onClick: saveVersionNow }, t('saveVersion')),
+            ),
+            versions.error ? h('div', { style: styles.error }, versions.error) : null,
+            versions.status === 'loading' ? h('div', { style: styles.note }, t('loading')) : null,
+            versions.status === 'ready' && rows.length === 0 ? h('div', { style: styles.note }, t('noVersions')) : null,
+            h('div', { style: styles.list }, rows),
+          );
+        };
+
         const renderInstalled = () => {
           if (skillsState.status === 'loading') return h('div', { style: styles.note }, t('loading'));
           if (skillsState.status === 'error') {
@@ -689,6 +834,15 @@ window.__ModuleLoader__.load({
                       ? h(
                           'div',
                           { style: styles.actions },
+                          h(
+                            'button',
+                            {
+                              style: Object.assign({}, styles.button, styles.small),
+                              disabled: busy === skill.name,
+                              onClick: () => openVersions(skill),
+                            },
+                            t('versions'),
+                          ),
                           h(
                             'button',
                             {
@@ -903,6 +1057,7 @@ window.__ModuleLoader__.load({
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
               : null,
             tab === 'installed' ? (editor ? renderEditor() : null) : null,
+            tab === 'installed' ? (versions ? renderVersions() : null) : null,
             tab === 'installed' ? renderInstalled() : renderCatalog(),
           ),
         );
