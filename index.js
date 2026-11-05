@@ -211,11 +211,20 @@ async function listSkills(ctx, req, url, res) {
   }
   const categoryOf = new Map(catalog.skills.map((entry) => [entry.name, entry.category]));
 
-  const rows = snapshot.skills.map((skill) => {
+  const rows = [];
+  for (const skill of snapshot.skills) {
     const row = toRow(skill);
-    row.category = categoryOf.get(row.name) ?? (row.source === 'bundled' ? 'builtin' : 'mine');
-    return row;
-  });
+    let own = '';
+    if (typeof row.path === 'string') {
+      try {
+        own = parseCategory(splitFrontmatter(await readFile(row.path, 'utf8')).frontmatter);
+      } catch {
+        // unreadable file: fall back to the catalog mapping
+      }
+    }
+    row.category = own || categoryOf.get(row.name) || (row.source === 'bundled' ? 'builtin' : 'mine');
+    rows.push(row);
+  }
 
   const categories = [
     ...catalog.categories,
@@ -243,7 +252,16 @@ async function getSkill(ctx, view, name, res) {
   if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
   const definition = await skills.get(name, { cwd: view.cwd, scope: view.scope });
   if (!definition) throw new HttpError(404, `skill "${name}" not found`);
-  sendJson(res, 200, { ...toRow(definition), content: definition.content });
+
+  let category = '';
+  if (typeof definition.path === 'string') {
+    try {
+      category = parseCategory(splitFrontmatter(await readFile(definition.path, 'utf8')).frontmatter);
+    } catch {
+      // a provider-supplied definition may have no readable file
+    }
+  }
+  sendJson(res, 200, { ...toRow(definition), category, content: definition.content });
 }
 
 function validateName(name) {
@@ -300,9 +318,54 @@ function setField(frontmatter, key, value) {
   return lines.join('\n');
 }
 
-function buildSkillFile({ name, description, whenToUse, content }) {
+function parseCategory(frontmatter) {
+  const lines = frontmatter.split(/\r?\n/);
+  const top = lines.find((line) => /^category:\s*/.test(line));
+  if (top) return top.replace(/^category:\s*/, '').replace(/^["']|["']$/g, '').trim();
+
+  const index = lines.findIndex((line) => /^metadata:\s*/.test(line));
+  if (index === -1) return '';
+  const flow = /\{(.*)\}/.exec(lines[index]);
+  if (flow) {
+    const match = /category:\s*["']?([^"',}]+)/.exec(flow[1]);
+    return match ? match[1].trim() : '';
+  }
+  for (let cursor = index + 1; cursor < lines.length && /^\s+/.test(lines[cursor]); cursor += 1) {
+    const match = /^\s+category:\s*(.*)$/.exec(lines[cursor]);
+    if (match) return match[1].replace(/^["']|["']$/g, '').trim();
+  }
+  return '';
+}
+
+function setMetadataCategory(frontmatter, category) {
+  const lines = frontmatter === '' ? [] : frontmatter.split(/\r?\n/);
+  const flow = lines.findIndex((line) => /^metadata:\s*\{.*\}\s*$/.test(line));
+  if (flow !== -1) lines.splice(flow, 1);
+
+  const start = lines.findIndex((line) => /^metadata:\s*$/.test(line));
+  const value = String(category ?? '').trim();
+
+  if (start === -1) {
+    if (value !== '') lines.push('metadata:', `  category: ${JSON.stringify(value)}`);
+    return lines.join('\n');
+  }
+
+  let end = start + 1;
+  while (end < lines.length && /^\s+/.test(lines[end])) end += 1;
+  const block = lines.slice(start + 1, end).filter((line) => !/^\s+category:/.test(line));
+  if (value !== '') block.push(`  category: ${JSON.stringify(value)}`);
+  if (block.length === 0) {
+    lines.splice(start, end - start);
+  } else {
+    lines.splice(start, end - start, 'metadata:', ...block);
+  }
+  return lines.join('\n');
+}
+
+function buildSkillFile({ name, description, whenToUse, content, category }) {
   const lines = ['---', `name: ${name}`, `description: ${quote(description)}`];
   if (whenToUse) lines.push(`whenToUse: ${quote(whenToUse)}`);
+  if (category) lines.push('metadata:', `  category: ${JSON.stringify(category)}`);
   lines.push('---', '');
   return `${lines.join('\n')}${content.trim()}\n`;
 }
@@ -312,6 +375,7 @@ async function writeSkill(ctx, view, body, res) {
   validateName(body.name);
   const description = validateDescription(body.description);
   const whenToUse = validateWhenToUse(body.whenToUse);
+  const category = typeof body.category === 'string' ? body.category.trim().slice(0, 40) : '';
   if (typeof body.content !== 'string' || body.content.trim() === '') {
     throw new HttpError(400, 'content is required');
   }
@@ -325,7 +389,7 @@ async function writeSkill(ctx, view, body, res) {
   if (await exists(file)) throw new HttpError(409, `skill "${body.name}" already exists in ${scope}`);
 
   await mkdir(directory, { recursive: true });
-  await writeFile(file, buildSkillFile({ name: body.name, description, whenToUse, content: body.content }), 'utf8');
+  await writeFile(file, buildSkillFile({ name: body.name, description, whenToUse, content: body.content, category }), 'utf8');
 
   res.statusCode = 201;
   sendJson(res, 201, { ok: true, path: file, name: body.name, scope });
@@ -366,6 +430,12 @@ async function updateSkill(ctx, view, body, res) {
   }
   if (body.enabled !== undefined) {
     frontmatter = setField(frontmatter, 'disable-model-invocation', body.enabled ? null : 'true');
+  }
+  if (body.category !== undefined) {
+    frontmatter = setMetadataCategory(
+      frontmatter,
+      typeof body.category === 'string' ? body.category.trim().slice(0, 40) : '',
+    );
   }
 
   const next = `---\n${frontmatter}\n---\n\n${content.replace(/^\n+/, '').trimEnd()}\n`;

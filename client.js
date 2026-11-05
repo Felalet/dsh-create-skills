@@ -51,6 +51,10 @@ window.__ModuleLoader__.load({
       disable: 'Выключить',
       confirmDelete: 'Удалить скилл',
       scope: 'Куда сохранить',
+      category: 'Категория',
+      noCategory: 'Без категории',
+      searchPlaceholder: 'Поиск по имени',
+      nothingFound: 'Ничего не найдено',
       scopeProject: 'в проект',
       scopeUser: 'в пользовательские',
       name: 'Имя (kebab-case)',
@@ -141,6 +145,10 @@ window.__ModuleLoader__.load({
       disable: 'Disable',
       confirmDelete: 'Delete skill',
       scope: 'Save to',
+      category: 'Category',
+      noCategory: 'No category',
+      searchPlaceholder: 'Search by name',
+      nothingFound: 'Nothing found',
       scopeProject: 'project',
       scopeUser: 'user',
       name: 'Name (kebab-case)',
@@ -435,6 +443,14 @@ window.__ModuleLoader__.load({
       return typeof label === 'string' && label !== key ? label : String(source);
     }
 
+    function categoryLabel(t, id, categories) {
+      if (!id) return '';
+      if (id === 'builtin') return t('catBuiltin');
+      if (id === 'mine') return t('catMine');
+      const found = (categories || []).find((category) => category.id === id);
+      return found ? found.title : id;
+    }
+
     class Boundary extends React.Component {
       constructor(props) {
         super(props);
@@ -481,6 +497,8 @@ window.__ModuleLoader__.load({
         });
         const [upgrading, setUpgrading] = React.useState(false);
         const [installScope, setInstallScope] = React.useState('project');
+        const [skillSearch, setSkillSearch] = React.useState('');
+        const [skillCategory, setSkillCategory] = React.useState('');
 
         const loadSkills = React.useCallback(async (cwd) => {
           setSkillsState({ status: 'loading' });
@@ -539,6 +557,7 @@ window.__ModuleLoader__.load({
           setEditor({
             mode: 'create',
             scope: 'project',
+            category: '',
             name: '',
             description: '',
             whenToUse: '',
@@ -555,6 +574,7 @@ window.__ModuleLoader__.load({
             setEditor({
               mode: 'edit',
               scope: skill.source === 'user-dsh' ? 'user' : 'project',
+              category: body.category || '',
               name: skill.name,
               description: body.description || '',
               whenToUse: body.whenToUse || '',
@@ -575,6 +595,7 @@ window.__ModuleLoader__.load({
             name: editor.name.trim(),
             description: editor.description.trim(),
             whenToUse: editor.whenToUse.trim(),
+            category: editor.category,
             content: editor.content,
           };
           if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(payload.name)) {
@@ -1105,6 +1126,27 @@ window.__ModuleLoader__.load({
             h(
               'label',
               { style: styles.field },
+              h('span', { style: styles.fieldLabel }, t('category')),
+              h(
+                'select',
+                {
+                  style: Object.assign({}, styles.select, { width: '100%' }),
+                  value: editor.category,
+                  onChange: (event) => setEditor({ ...editor, category: event.target.value }),
+                },
+                h('option', { value: '' }, t('noCategory')),
+                (data && data.categories ? data.categories : []).map((category) =>
+                  h(
+                    'option',
+                    { key: category.id, value: category.id },
+                    categoryLabel(t, category.id, data ? data.categories : []),
+                  ),
+                ),
+              ),
+            ),
+            h(
+              'label',
+              { style: styles.field },
               h('span', { style: styles.fieldLabel }, t('description')),
               h('input', {
                 style: Object.assign({}, styles.input, { width: '100%' }),
@@ -1245,9 +1287,45 @@ window.__ModuleLoader__.load({
             );
           }
           const budget = data.totalWeight + (data.catalogOverhead || 0);
+          const term = skillSearch.trim().toLowerCase();
+          const visible = data.skills.filter((skill) => {
+            const byCategory = !skillCategory || skill.category === skillCategory;
+            const byName =
+              term === '' ||
+              skill.name.toLowerCase().includes(term) ||
+              (skill.description || '').toLowerCase().includes(term);
+            return byCategory && byName;
+          });
           return h(
             'div',
             null,
+            h(
+              'div',
+              { style: Object.assign({}, styles.toolbar, { marginTop: 12 }) },
+              h('input', {
+                style: Object.assign({}, styles.input, { flex: '1 1 180px' }),
+                value: skillSearch,
+                placeholder: t('searchPlaceholder'),
+                spellCheck: false,
+                onChange: (event) => setSkillSearch(event.target.value),
+              }),
+              h(
+                'select',
+                {
+                  style: styles.select,
+                  value: skillCategory,
+                  onChange: (event) => setSkillCategory(event.target.value),
+                },
+                h('option', { value: '' }, t('allCategories')),
+                (data.categories || []).map((category) =>
+                  h(
+                    'option',
+                    { key: category.id, value: category.id },
+                    categoryLabel(t, category.id, data.categories),
+                  ),
+                ),
+              ),
+            ),
             h(
               'div',
               { style: styles.summary },
@@ -1262,10 +1340,11 @@ window.__ModuleLoader__.load({
                   `${t('budgetOver')}: ~${budget} ${t('tokens')}. ${t('budgetHint')}`,
                 )
               : null,
+            visible.length === 0 ? h('div', { style: styles.note }, t('nothingFound')) : null,
             h(
               'div',
               { style: styles.list },
-              data.skills.map((skill) =>
+              visible.map((skill) =>
                 h(
                   'div',
                   { key: skill.name, style: styles.row },
@@ -1321,6 +1400,9 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: styles.rowSide },
                     h('span', { style: styles.badge }, sourceLabel(t, skill.source)),
+                    skill.category
+                      ? h('span', { style: styles.badge }, categoryLabel(t, skill.category, data.categories))
+                      : null,
                     skill.modelInvocable
                       ? h('span', { style: styles.badge }, t('modelOn'))
                       : h('span', { style: Object.assign({}, styles.badge, styles.warn) }, t('modelOff')),
