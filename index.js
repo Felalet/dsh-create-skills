@@ -1029,6 +1029,22 @@ async function collectSkills(ctx, view, res) {
   sendJson(res, 200, { ok: true, copied, skipped });
 }
 
+// The client only knows a session id when the context menu opens, so the host
+// resolves its working directory for the Skills page.
+async function sessionPath(ctx, url, res) {
+  const id = url.searchParams.get('id');
+  if (!id) throw new HttpError(400, 'id is required');
+  const sessions = ctx.get('sessions');
+  const list = sessions && typeof sessions.list === 'function' ? sessions.list() : [];
+  const found = list.find(
+    (session) =>
+      session &&
+      (session.id === id || session.sessionId === id || (session.header && session.header.id === id)),
+  );
+  const cwd = found && found.header ? found.header.cwd : null;
+  sendJson(res, 200, { path: typeof cwd === 'string' && cwd !== '' ? cwd : null });
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1736,6 +1752,22 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await groupByTask(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/session-path`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          await sessionPath(ctx, url, res);
         } catch (error) {
           errorResponse(res, error);
         }

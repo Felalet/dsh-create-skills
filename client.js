@@ -3355,7 +3355,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { ru: RU, zh: ZH, en: EN }), 'create-skills: dictionaries');
 
@@ -3387,6 +3387,13 @@ window.__ModuleLoader__.load({
             PanelIcon,
           ),
         );
+        // A small glyph inside the context menu, keyed by the action's icon key.
+        ctx.slots.inject('contextMenu.icon', () =>
+          ctx.slots.register(
+            { name: 'contextMenu.icon', key: 'create-skills', locale: NS },
+            () => h(PanelIcon, { size: 16 }),
+          ),
+        );
 
         // Right-click a Session -> Skills: open this page for that session's
         // workspace. Guarded, because the context-menu service is optional.
@@ -3404,13 +3411,24 @@ window.__ModuleLoader__.load({
               {
                 id: 'skills',
                 label: tr('title'),
+                icon: { key: 'create-skills' },
                 run: () => {
-                  const path = workspacePathOf(ctx, target);
-                  trackEvent(
-                    'menu-run',
-                    `${target ? Object.keys(target).join(',') : 'no-target'} -> ${path || 'no-path'}`,
-                  );
-                  openSkillsFor(ctx, path);
+                  const sessionId = target ? target.sessionId : '';
+                  const fallback = workspacePathOf(ctx, target);
+                  trackEvent('menu-run', `${sessionId || 'no-session'} -> ${fallback || 'lookup'}`);
+                  if (!sessionId) {
+                    openSkillsFor(ctx, fallback);
+                    return;
+                  }
+                  api(`/session-path?id=${encodeURIComponent(sessionId)}`)
+                    .then((body) => {
+                      trackEvent('menu-path', body.path || 'no-path');
+                      openSkillsFor(ctx, body.path || fallback);
+                    })
+                    .catch((error) => {
+                      trackEvent('menu-path-failed', error instanceof Error ? error.message : String(error));
+                      openSkillsFor(ctx, fallback);
+                    });
                 },
               },
             ],
