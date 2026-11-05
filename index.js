@@ -877,33 +877,35 @@ async function listWorkspaces(res) {
   sendJson(res, 200, { workspaces: await readWorkspaces() });
 }
 
-// Skills of every registered workspace, so a skill in one workspace can be
-// found and carried into another.
-async function listWorkspaceSkills(ctx, res) {
-  const skills = ctx.get('skills');
-  if (!skills) throw new HttpError(503, 'skills service is not available in this profile');
+// Skills of every registered workspace, read straight from
+// <workspace>/.dsh/skills: the registry snapshot needs a session scope and
+// returns nothing for a workspace that is not open.
+async function listWorkspaceSkills(res) {
   const result = [];
   for (const workspace of await readWorkspaces()) {
+    const root = join(workspace.path, '.dsh', 'skills');
     const rows = [];
+    let entries = [];
     try {
-      const snapshot = await skills.snapshot({ cwd: workspace.path });
-      for (const skill of snapshot.skills) {
-        if (typeof skill.path !== 'string' || !isInsidePath(skill.path, workspace.path)) continue;
-        let category = '';
-        try {
-          category = parseCategory(splitFrontmatter(await readFile(skill.path, 'utf8')).frontmatter);
-        } catch {
-          // a skill without a readable file still lists
-        }
-        rows.push({
-          name: skill.name,
-          description: skill.description ?? '',
-          category,
-          enabled: skill.invocation?.modelInvocable !== false,
-        });
-      }
+      entries = await readdir(root, { withFileTypes: true });
     } catch {
-      // an unreachable workspace is listed without skills
+      // a workspace without a skill root has no skills
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      let raw = '';
+      try {
+        raw = await readFile(join(root, entry.name, 'SKILL.md'), 'utf8');
+      } catch {
+        continue;
+      }
+      const parsed = splitFrontmatter(raw);
+      rows.push({
+        name: parsed.fields.name || entry.name,
+        description: parsed.fields.description || '',
+        category: parseCategory(parsed.frontmatter),
+        enabled: !/^disable-model-invocation:\s*true\s*$/im.test(parsed.frontmatter),
+      });
     }
     result.push({ path: workspace.path, title: workspace.title, skills: rows });
   }
@@ -1667,7 +1669,7 @@ export function apply(ctx) {
             sendJson(res, 405, { error: 'method not allowed' });
             return;
           }
-          await listWorkspaceSkills(ctx, res);
+          await listWorkspaceSkills(res);
         } catch (error) {
           errorResponse(res, error);
         }
