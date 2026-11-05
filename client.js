@@ -77,6 +77,9 @@ window.__ModuleLoader__.load({
       chooseLeft: 'Выбрать левый',
       chooseRight: 'Выбрать правый',
       comparePick: 'Выберите скиллы слева и справа',
+      allCategories: 'Все категории',
+      catBuiltin: 'Встроенные',
+      catMine: 'Мои скиллы',
       verdictWinner: 'Лучше по оценке',
       chooseAndDisable: 'Выбрать этот скилл и выключить второй',
       otherReadOnly: 'Второй скилл встроенный — выключить его нельзя',
@@ -161,6 +164,9 @@ window.__ModuleLoader__.load({
       chooseLeft: 'Choose left',
       chooseRight: 'Choose right',
       comparePick: 'Pick a skill on both sides',
+      allCategories: 'All categories',
+      catBuiltin: 'Bundled',
+      catMine: 'My skills',
       verdictWinner: 'AI verdict',
       chooseAndDisable: 'Choose this skill and disable the other',
       otherReadOnly: 'The other skill is bundled and cannot be disabled',
@@ -459,8 +465,8 @@ window.__ModuleLoader__.load({
         const [notice, setNotice] = React.useState(null);
         const [versions, setVersions] = React.useState(null);
         const [compare, setCompare] = React.useState({
-          left: { skill: '', label: '' },
-          right: { skill: '', label: '' },
+          left: { category: '', skill: '', label: '' },
+          right: { category: '', skill: '', label: '' },
           task: '',
           busy: false,
           error: null,
@@ -826,9 +832,13 @@ window.__ModuleLoader__.load({
 
         const renderCompare = () => {
           const skills = data ? data.skills : [];
+          const categories = data && data.categories ? data.categories : [];
           const sideCard = (side, title) => {
             const sideState = compare[side];
             const sideVersions = compare.versions[side] || [];
+            const visibleSkills = skills.filter(
+              (skill) => !sideState.category || skill.category === sideState.category,
+            );
             return h(
               'div',
               { style: Object.assign({}, styles.form, { flex: '1 1 320px', marginTop: 0 }) },
@@ -837,11 +847,32 @@ window.__ModuleLoader__.load({
                 'select',
                 {
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
+                  value: sideState.category,
+                  onChange: (event) =>
+                    setCompareSide(side, { category: event.target.value, skill: '', label: '' }),
+                },
+                h('option', { value: '' }, t('allCategories')),
+                categories.map((category) =>
+                  h(
+                    'option',
+                    { key: category.id, value: category.id },
+                    category.id === 'builtin'
+                      ? t('catBuiltin')
+                      : category.id === 'mine'
+                        ? t('catMine')
+                        : category.title,
+                  ),
+                ),
+              ),
+              h(
+                'select',
+                {
+                  style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
                   value: sideState.skill,
                   onChange: (event) => setCompareSide(side, { skill: event.target.value, label: '' }),
                 },
                 h('option', { value: '' }, '—'),
-                skills.map((skill) => h('option', { key: skill.name, value: skill.name }, skill.name)),
+                visibleSkills.map((skill) => h('option', { key: skill.name, value: skill.name }, skill.name)),
               ),
               h(
                 'select',

@@ -202,7 +202,26 @@ async function readSnapshot(ctx, view) {
 async function listSkills(ctx, req, url, res) {
   const view = await resolveView(ctx, url.searchParams.get('cwd'));
   const snapshot = await readSnapshot(ctx, view);
-  const rows = snapshot.skills.map(toRow);
+
+  let catalog = { categories: [], skills: [] };
+  try {
+    catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+  } catch {
+    // a missing or broken catalog must not break the installed list
+  }
+  const categoryOf = new Map(catalog.skills.map((entry) => [entry.name, entry.category]));
+
+  const rows = snapshot.skills.map((skill) => {
+    const row = toRow(skill);
+    row.category = categoryOf.get(row.name) ?? (row.source === 'bundled' ? 'builtin' : 'mine');
+    return row;
+  });
+
+  const categories = [
+    ...catalog.categories,
+    { id: 'builtin', title: 'Встроенные' },
+    { id: 'mine', title: 'Мои скиллы' },
+  ];
 
   stats.requests += 1;
   stats.lastAt = new Date().toISOString();
@@ -213,6 +232,7 @@ async function listSkills(ctx, req, url, res) {
     projectRoot: view.cwd,
     complete: snapshot.complete !== false,
     skills: rows,
+    categories,
     totalWeight: rows.reduce((sum, row) => sum + row.weight, 0),
     catalogOverhead: 200,
   });
