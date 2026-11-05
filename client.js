@@ -905,6 +905,50 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // A "Skills" item in the Session context menu opens this page for the
+    // workspace that session belongs to.
+    let pendingWorkspacePath = null;
+    const workspaceListeners = new Set();
+
+    function workspacePathOf(ctx, target) {
+      try {
+        const snapshot = ctx.workspaces && ctx.workspaces.list ? ctx.workspaces.list.getSnapshot() : null;
+        const list = snapshot && Array.isArray(snapshot.workspaces) ? snapshot.workspaces : [];
+        const sessionId = target ? target.sessionId : null;
+        const found = list.find(
+          (workspace) => Array.isArray(workspace.sessionIds) && workspace.sessionIds.includes(sessionId),
+        );
+        if (found && typeof found.path === 'string' && found.path !== '') return found.path;
+      } catch {
+        // fall through to the session header
+      }
+      try {
+        const sessions = ctx.get('sessions');
+        const session = sessions && typeof sessions.get === 'function' ? sessions.get(target ? target.sessionId : null) : null;
+        const cwd = session && session.header ? session.header.cwd : null;
+        if (typeof cwd === 'string' && cwd !== '') return cwd;
+      } catch {
+        // fall through
+      }
+      return target && typeof target.path === 'string' ? target.path : null;
+    }
+
+    function openSkillsFor(ctx, path) {
+      pendingWorkspacePath = path;
+      for (const listener of workspaceListeners) {
+        try {
+          listener(path);
+        } catch {
+          // one broken listener must not block the others
+        }
+      }
+      try {
+        if (ctx.layout && typeof ctx.layout.selectPanel === 'function') ctx.layout.selectPanel('create-skills');
+      } catch {
+        // the page can still be opened from the sidebar
+      }
+    }
+
     function makePage(t, ctx) {
       // Re-render the page when the app locale changes: t() reads the current
       // locale on every call, but nothing would otherwise schedule a render.
@@ -1046,6 +1090,23 @@ window.__ModuleLoader__.load({
             body: JSON.stringify({ event: 'mounted' }),
           }).catch(() => {});
         }, []);
+
+        React.useEffect(() => {
+          const listener = (path) => {
+            if (!path) return;
+            setTab('installed');
+            setPathDraft(path);
+            loadSkills(path);
+            loadCatalog(path);
+          };
+          workspaceListeners.add(listener);
+          if (pendingWorkspacePath) {
+            const path = pendingWorkspacePath;
+            pendingWorkspacePath = null;
+            listener(path);
+          }
+          return () => workspaceListeners.delete(listener);
+        }, [loadSkills, loadCatalog]);
 
         React.useEffect(() => {
           if ((tab === 'catalog' || tab === 'compare') && catalogState.status === 'idle') {
@@ -3316,6 +3377,29 @@ window.__ModuleLoader__.load({
             PanelIcon,
           ),
         );
+
+        // Right-click a Session -> Skills: open this page for that session's
+        // workspace. Guarded, because the context-menu service is optional.
+        ctx.effect(() => {
+          const menus = ctx.get('contextMenus');
+          if (!menus || typeof menus.register !== 'function') return undefined;
+          return menus.register({
+            id: 'session.skills',
+            target: 'session',
+            order: 520,
+            resolve: (target) => {
+              const path = workspacePathOf(ctx, target);
+              if (!path) return [];
+              return [
+                {
+                  id: 'skills',
+                  label: tr('title'),
+                  run: () => openSkillsFor(ctx, path),
+                },
+              ];
+            },
+          });
+        }, 'create-skills: session menu');
       },
     };
   },
