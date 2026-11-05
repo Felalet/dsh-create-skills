@@ -2384,6 +2384,14 @@ window.__ModuleLoader__.load({
           }
           if (!catalog || catalog.skills.length === 0) return h('div', { style: styles.note }, t('catalogEmpty'));
 
+          // Hand-made and imported skills have no catalog entry, so the catalog
+          // owns their management too: without this section they could not be
+          // disabled or removed anywhere.
+          const catalogNames = new Set(catalog.skills.map((entry) => entry.name));
+          const ownSkills = (data ? data.skills : []).filter(
+            (skill) => skill.writable && !catalogNames.has(skill.name),
+          );
+
           return h(
             'div',
             null,
@@ -2403,6 +2411,61 @@ window.__ModuleLoader__.load({
               ),
             ),
             h('div', { style: styles.note }, t('catalogCreatedHint')),
+            ownSkills.length > 0
+              ? h(
+                  'div',
+                  null,
+                  h('div', { style: styles.sectionTitle }, `${t('catMine')} · ${ownSkills.length}`),
+                  h(
+                    'div',
+                    { style: styles.list },
+                    ownSkills.map((skill) =>
+                      h(
+                        'div',
+                        { key: skill.name, style: styles.row },
+                        h(
+                          'div',
+                          { style: styles.rowMain },
+                          h('div', { style: styles.name }, skill.name),
+                          h('div', { style: styles.description }, skill.description),
+                        ),
+                        h(
+                          'div',
+                          { style: styles.rowSide },
+                          h('span', { style: styles.badge }, sourceLabel(t, skill.source)),
+                          h(
+                            'button',
+                            {
+                              style: Object.assign({}, styles.button, styles.small),
+                              disabled: busy === skill.name,
+                              onClick: () => toggleSkill(skill),
+                            },
+                            skill.modelInvocable ? t('disable') : t('enable'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              style: Object.assign({}, styles.button, styles.small),
+                              disabled: busy === skill.name,
+                              onClick: () => openEdit(skill),
+                            },
+                            t('edit'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              style: Object.assign({}, styles.button, styles.small, styles.danger),
+                              disabled: busy === skill.name,
+                              onClick: () => removeSkill(skill),
+                            },
+                            t('delete'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              : null,
             catalog.categories.map((category) => {
               const entries = catalog.skills.filter((entry) => entry.category === category.id);
               const missing = entries.filter((entry) => !entry.installed);
@@ -2602,8 +2665,8 @@ window.__ModuleLoader__.load({
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
               : null,
             renderPreview(),
-            tab === 'installed' ? (editor ? renderEditor() : null) : null,
-            tab === 'installed' ? (versions ? renderVersions() : null) : null,
+            editor ? renderEditor() : null,
+            versions ? renderVersions() : null,
             tab === 'installed'
               ? renderInstalled()
               : tab === 'catalog'
