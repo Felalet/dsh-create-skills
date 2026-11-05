@@ -69,6 +69,8 @@ window.__ModuleLoader__.load({
       hiddenSkills: 'отключено',
       scopeProject: 'в проект',
       scopeUser: 'в пользовательские',
+      scopeProjectHint: 'Скилл будет доступен только в этом проекте',
+      scopeUserHint: 'Скилл будет доступен во всех проектах',
       name: 'Имя (kebab-case)',
       description: 'Описание (одна строка, до 200 символов)',
       descriptionPlaceholder: 'Что делает и когда применять — по этой строке модель выбирает скилл',
@@ -218,6 +220,8 @@ window.__ModuleLoader__.load({
       hiddenSkills: 'disabled',
       scopeProject: 'project',
       scopeUser: 'user',
+      scopeProjectHint: 'The skill will be available only in this project',
+      scopeUserHint: 'The skill will be available in every project',
       name: 'Name (kebab-case)',
       description: 'Description (one line, up to 200 chars)',
       descriptionPlaceholder: 'What it does and when to use it — the model picks skills by this line',
@@ -367,6 +371,8 @@ window.__ModuleLoader__.load({
       hiddenSkills: '已停用',
       scopeProject: '项目内',
       scopeUser: '用户目录',
+      scopeProjectHint: '技能仅在当前项目中可用',
+      scopeUserHint: '技能将在所有项目中可用',
       name: '名称（kebab-case）',
       description: '描述（一行，最多 200 字符）',
       descriptionPlaceholder: '做什么、何时使用——模型依据这一行选择技能',
@@ -1923,6 +1929,15 @@ window.__ModuleLoader__.load({
                   )
                 : null,
             ),
+            editor.mode === 'create'
+              ? h(
+                  'div',
+                  { style: styles.note },
+                  editor.scope === 'user'
+                    ? t('scopeUserHint')
+                    : `${t('scopeProjectHint')}: ${pathDraft}`,
+                )
+              : null,
             h(
               'label',
               { style: styles.field },
