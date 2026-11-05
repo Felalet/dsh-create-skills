@@ -2364,6 +2364,10 @@ window.__ModuleLoader__.load({
                   { style: styles.list },
                   entries.map((entry) => {
                     const text = catalogText(entry);
+                    // An installed catalog entry is manageable right here: the
+                    // row keeps preview + install, and adds disable/delete for
+                    // the installed copy when it is writable.
+                    const installedSkill = data ? data.skills.find((skill) => skill.name === entry.name) : null;
                     return h(
                       'div',
                       { key: entry.id, style: styles.row },
@@ -2400,6 +2404,28 @@ window.__ModuleLoader__.load({
                               },
                               busy === entry.id ? t('installing') : t('install'),
                             ),
+                        installedSkill && installedSkill.writable
+                          ? h(
+                              'button',
+                              {
+                                style: Object.assign({}, styles.button, styles.small),
+                                disabled: busy === installedSkill.name,
+                                onClick: () => toggleSkill(installedSkill),
+                              },
+                              installedSkill.modelInvocable ? t('disable') : t('enable'),
+                            )
+                          : null,
+                        installedSkill && installedSkill.writable
+                          ? h(
+                              'button',
+                              {
+                                style: Object.assign({}, styles.button, styles.small, styles.danger),
+                                disabled: busy === installedSkill.name,
+                                onClick: () => removeSkill(installedSkill),
+                              },
+                              t('delete'),
+                            )
+                          : null,
                       ),
                     );
                   }),
