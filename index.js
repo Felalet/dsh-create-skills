@@ -943,13 +943,28 @@ async function removeVersion(ctx, url, res) {
 }
 
 async function readVariant(ctx, view, spec) {
+  if (!spec || (typeof spec.name !== 'string' && typeof spec.catalogId !== 'string')) {
+    throw new HttpError(400, 'skill name is required for each side');
+  }
+  // A saved version wins over the base body: an AI-improved version of a
+  // catalog skill is stored in the project and compared by its label.
+  if (spec.label) {
+    if (typeof spec.name !== 'string') throw new HttpError(400, 'skill name is required for a version');
+    validateName(spec.name);
+    const projectRoot = await findProjectRoot(view.cwd);
+    const label = safeLabel(spec.label);
+    const file = join(versionsDir(projectRoot, spec.name), label, 'SKILL.md');
+    assertInside(file, [join(projectRoot, '.dsh')]);
+    if (!(await exists(file))) throw new HttpError(404, `version "${label}" of "${spec.name}" not found`);
+    const raw = await readFile(file, 'utf8');
+    return { name: spec.name, label, raw, body: splitFrontmatter(raw).body };
+  }
   // A catalog side is compared from its repository copy, so a skill can be
   // compared before it is installed.
-  if (spec && typeof spec.catalogId === 'string' && spec.catalogId !== '') {
+  if (typeof spec.catalogId === 'string' && spec.catalogId !== '') {
     const { entry, content } = await fetchCatalogEntry(spec.catalogId);
     return { name: entry.name, label: null, raw: content, body: splitFrontmatter(content).body };
   }
-  if (!spec || typeof spec.name !== 'string') throw new HttpError(400, 'skill name is required for each side');
   validateName(spec.name);
   if (spec.label) {
     const projectRoot = await findProjectRoot(view.cwd);
@@ -1097,7 +1112,11 @@ function stripFences(text) {
 }
 
 async function improveSkill(ctx, view, body, res) {
-  const original = await readVariant(ctx, view, { name: body.name, label: body.label });
+  const original = await readVariant(ctx, view, {
+    name: body.name,
+    label: body.label,
+    catalogId: body.catalogId,
+  });
   const parsed = splitFrontmatter(original.raw);
   const task = typeof body.task === 'string' ? body.task.trim() : '';
   const text = await streamModel(

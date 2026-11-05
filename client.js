@@ -1357,12 +1357,18 @@ window.__ModuleLoader__.load({
               body: JSON.stringify({
                 name: compare.left.skill,
                 label: compare.left.label || undefined,
+                catalogId: compare.left.catalogId || undefined,
                 task: compare.task,
               }),
             });
             setCompare((current) =>
               Object.assign({}, current, {
-                right: { category: current.left.category, skill: improved.skill, label: improved.label },
+                right: {
+                  category: current.left.category,
+                  skill: improved.skill,
+                  catalogId: current.left.catalogId || '',
+                  label: improved.label,
+                },
               }),
             );
             await loadCompareVersions('right', improved.skill);
@@ -1663,11 +1669,11 @@ window.__ModuleLoader__.load({
                 {
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
                   value: sideState.label,
-                  disabled: Boolean(sideState.catalogId),
+                  disabled: Boolean(sideState.catalogId) && sideVersions.length === 0,
                   onChange: (event) => setCompareSide(side, { label: event.target.value }),
                 },
                 h('option', { value: '' }, t('currentVersion')),
-                sideState.catalogId
+                sideVersions.length === 0
                   ? null
                   : sideVersions.map((version) => h('option', { key: version.label, value: version.label }, version.label)),
               ),
