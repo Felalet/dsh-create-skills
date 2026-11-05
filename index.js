@@ -332,6 +332,15 @@ async function getSkill(ctx, view, name, res) {
       // a provider-supplied definition may have no readable file
     }
   }
+  // A skill without explicit frontmatter metadata still has an effective
+  // category in the list (catalog mapping, or "mine"/"builtin" by source), so
+  // the editor must open with that value instead of "No category".
+  if (category === '') {
+    const projectRoot = await findProjectRoot(view.cwd);
+    const { catalog } = await mergedCategories(projectRoot);
+    const mapped = catalog.skills.find((entry) => entry.name === definition.name);
+    category = mapped ? mapped.category : definition.source === 'bundled' ? 'builtin' : 'mine';
+  }
   sendJson(res, 200, { ...toRow(definition), category, content: definition.content });
 }
 

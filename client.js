@@ -1034,7 +1034,7 @@ window.__ModuleLoader__.load({
             setEditor({
               mode: 'edit',
               scope: skill.source === 'user-dsh' ? 'user' : 'project',
-              category: body.category || '',
+              category: body.category || skill.category || '',
               name: skill.name,
               description: body.description || '',
               whenToUse: body.whenToUse || '',
