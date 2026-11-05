@@ -678,6 +678,47 @@ async function installCatalogSkills(ctx, view, body, res) {
   });
 }
 
+const previewCache = new Map();
+const MAX_PREVIEW_BYTES = 512 * 1024;
+
+// A catalog entry points at a skill directory inside a repository, so the
+// preview fetches just SKILL.md over HTTPS instead of the whole archive.
+async function previewCatalogEntry(url, res) {
+  const id = url.searchParams.get('id');
+  if (!id) throw new HttpError(400, 'id is required');
+  const catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+  const entry = catalog.skills.find((candidate) => candidate.id === id);
+  if (!entry) throw new HttpError(404, `catalog entry "${id}" not found`);
+
+  let cached = previewCache.get(entry.id);
+  if (!cached) {
+    const dir = String(entry.source.path).replace(/^\/+|\/+$/g, '');
+    const raw = `https://raw.githubusercontent.com/${entry.source.repo}/${entry.source.ref}/${dir}/SKILL.md`;
+    const response = await fetch(raw, { headers: { 'user-agent': 'create-skills/0.1' } });
+    if (!response.ok) {
+      throw new HttpError(502, `preview failed: HTTP ${response.status} for ${entry.source.repo}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > MAX_PREVIEW_BYTES) throw new HttpError(413, 'preview is too large');
+    cached = { raw, content: buffer.toString('utf8') };
+    previewCache.set(entry.id, cached);
+  }
+
+  sendJson(res, 200, {
+    id: entry.id,
+    name: entry.name,
+    title: entry.title,
+    titleEn: entry.titleEn ?? null,
+    description: entry.description,
+    descriptionEn: entry.descriptionEn ?? null,
+    category: entry.category,
+    license: entry.license ?? null,
+    source: entry.source,
+    rawUrl: cached.raw,
+    content: cached.content,
+  });
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1112,6 +1153,22 @@ export function apply(ctx) {
         try {
           const url = new URL(req.url ?? '/', 'http://localhost');
           await listCatalog(ctx, url, res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/preview`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          await previewCatalogEntry(url, res);
         } catch (error) {
           errorResponse(res, error);
         }

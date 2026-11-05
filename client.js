@@ -73,6 +73,7 @@ window.__ModuleLoader__.load({
       whenToUse: 'Когда применять (необязательно)',
       content: 'Инструкции (Markdown)',
       created: 'Скилл создан',
+      loaded: 'Обновлено',
       saved: 'Сохранено',
       deleted: 'Удалено',
       installedNotice: 'Установлено',
@@ -84,6 +85,7 @@ window.__ModuleLoader__.load({
       catalogLoading: 'Загружаем каталог…',
       allInstalled: 'Все скиллы категории уже установлены',
       installScope: 'Установить',
+      previewSource: 'Источник',
       tabCompare: 'Сравнение',
       compareTask: 'Задача для сравнения (необязательно)',
       compareTaskPlaceholder: 'Например: подготовить квартальный отчёт с таблицей',
@@ -202,6 +204,7 @@ window.__ModuleLoader__.load({
       whenToUse: 'When to use (optional)',
       content: 'Instructions (Markdown)',
       created: 'Skill created',
+      loaded: 'Refreshed',
       saved: 'Saved',
       deleted: 'Deleted',
       installedNotice: 'Installed',
@@ -213,6 +216,7 @@ window.__ModuleLoader__.load({
       catalogLoading: 'Loading catalog…',
       allInstalled: 'Every skill in this category is already installed',
       installScope: 'Install to',
+      previewSource: 'Source',
       tabCompare: 'Compare',
       compareTask: 'Task to compare on (optional)',
       compareTaskPlaceholder: 'For example: prepare a quarterly report with a table',
@@ -331,6 +335,7 @@ window.__ModuleLoader__.load({
       whenToUse: '何时使用（可选）',
       content: '指令（Markdown）',
       created: '技能已创建',
+      loaded: '已刷新',
       saved: '已保存',
       deleted: '已删除',
       installedNotice: '已安装',
@@ -342,6 +347,7 @@ window.__ModuleLoader__.load({
       catalogLoading: '正在加载技能库…',
       allInstalled: '该分类中的技能都已安装',
       installScope: '安装到',
+      previewSource: '来源',
       tabCompare: '对比',
       compareTask: '用于对比的任务（可选）',
       compareTaskPlaceholder: '例如：准备一份带表格的季度报告',
@@ -544,6 +550,48 @@ window.__ModuleLoader__.load({
       empty: { marginTop: 36, padding: '28px 20px', textAlign: 'center', border: '1px dashed var(--dsw-alias-border-l1)', borderRadius: 12 },
       emptyTitle: { fontSize: 14, fontWeight: 600 },
       emptyHint: { marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' },
+      rowClickable: { cursor: 'pointer' },
+      // Preview dialog: a plain <pre> keeps third-party SKILL.md text inert.
+      modalBackdrop: {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'rgba(0, 0, 0, 0.45)',
+      },
+      modal: {
+        width: 'min(760px, 100%)',
+        maxHeight: '82vh',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: 20,
+        background: 'var(--dsw-alias-bg-layer-1)',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: 12,
+        boxShadow: '0 24px 64px rgba(0, 0, 0, 0.35)',
+      },
+      modalHeader: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 },
+      modalMeta: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' },
+      modalBody: { display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' },
+      pre: {
+        margin: 0,
+        padding: 12,
+        maxHeight: '46vh',
+        overflow: 'auto',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        fontSize: 12.5,
+        lineHeight: 1.5,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        color: 'var(--dsw-alias-label-primary)',
+        background: 'var(--dsw-alias-bg-base)',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: 8,
+      },
     };
 
     function sleep(ms) {
@@ -661,6 +709,16 @@ window.__ModuleLoader__.load({
       };
     }
 
+    // A category with no skills is a dead end in a filter, so a picker only
+    // offers the categories the loaded skills actually carry.
+    function categoriesWithSkills(skills, categories) {
+      const ids = [];
+      for (const skill of skills || []) {
+        if (skill.category && !ids.includes(skill.category)) ids.push(skill.category);
+      }
+      return ids.map((id) => (categories || []).find((category) => category.id === id) || { id, title: id });
+    }
+
     function categoryLabel(t, id, categories) {
       if (!id) return '';
       const known = {
@@ -738,20 +796,40 @@ window.__ModuleLoader__.load({
         const [groupTask, setGroupTask] = React.useState('');
         const [groups, setGroups] = React.useState(null);
         const [grouping, setGrouping] = React.useState(false);
+        // A manual load or refresh keeps the current list on screen and only
+        // disables the buttons; the first mount still shows the loading state.
+        const [refreshing, setRefreshing] = React.useState(false);
         // null — the inline "new category" row is closed; a string is its input value.
         // A window.prompt would be the obvious control here, but the DSH Web client
         // runs in Electron, where prompt() is unavailable and the click would do nothing.
         const [categoryDraft, setCategoryDraft] = React.useState(null);
+        // Catalog preview: fetched on demand, so installing is a separate decision.
+        const [preview, setPreview] = React.useState(null);
 
-        const loadSkills = React.useCallback(async (cwd) => {
-          setSkillsState({ status: 'loading' });
+        React.useEffect(() => {
+          if (!preview) return undefined;
+          const onKey = (event) => {
+            if (event.key === 'Escape') setPreview(null);
+          };
+          window.addEventListener('keydown', onKey);
+          return () => window.removeEventListener('keydown', onKey);
+        }, [preview]);
+
+        const loadSkills = React.useCallback(async (cwd, quiet = false) => {
+          if (quiet) setRefreshing(true);
+          else setSkillsState({ status: 'loading' });
           try {
             const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
             const body = await api(`/skills${query}`);
             setSkillsState({ status: 'ready', data: body });
             setPathDraft((current) => current || body.projectRoot || '');
+            return { ok: true, count: Array.isArray(body.skills) ? body.skills.length : 0, root: body.projectRoot };
           } catch (error) {
-            setSkillsState({ status: 'error', message: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            setSkillsState({ status: 'error', message });
+            return { ok: false, message };
+          } finally {
+            if (quiet) setRefreshing(false);
           }
         }, []);
 
@@ -788,11 +866,59 @@ window.__ModuleLoader__.load({
           return () => clearTimeout(timer);
         }, [notice]);
 
+        // Diagnostics: every manual load lands in the plugin's /client-event log,
+        // so a click that silently does nothing leaves a trace on the host.
+        const track = (event, detail) => {
+          fetch(`${API}/client-event`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ event, message: detail ?? null }),
+          }).catch(() => {});
+        };
+
+        const reportLoad = (result) => {
+          if (!result || !result.ok) {
+            setNotice({ kind: 'error', text: `${t('error')}: ${result ? result.message : t('error')}` });
+            return;
+          }
+          setNotice({ kind: 'ok', text: `${t('loaded')}: ${result.count} ${t('skills')}` });
+        };
+
+        const loadFromPath = async () => {
+          const cwd = pathDraft.trim() || undefined;
+          track('load', cwd ?? '(session cwd)');
+          const result = await loadSkills(cwd, true);
+          if (tab === 'catalog') await loadCatalog(cwd);
+          reportLoad(result);
+        };
+
         const refresh = async () => {
           const cwd = pathDraft.trim() || undefined;
+          track('refresh', cwd ?? '(session cwd)');
           await sleep(250);
-          await loadSkills(cwd);
+          const result = await loadSkills(cwd, true);
           if (tab === 'catalog') await loadCatalog(cwd);
+          reportLoad(result);
+        };
+
+        const openPreview = async (entry) => {
+          if (!entry) return;
+          setPreview({ id: entry.id, entry, status: 'loading', content: '', rawUrl: null, error: null });
+          try {
+            const body = await api(`/preview?id=${encodeURIComponent(entry.id)}`);
+            setPreview((current) =>
+              current && current.id === entry.id
+                ? Object.assign({}, current, { status: 'ready', content: body.content, rawUrl: body.rawUrl })
+                : current,
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setPreview((current) =>
+              current && current.id === entry.id
+                ? Object.assign({}, current, { status: 'error', error: message })
+                : current,
+            );
+          }
         };
 
         const openCreate = () => {
@@ -1220,8 +1346,12 @@ window.__ModuleLoader__.load({
           const sideCard = (side, title) => {
             const sideState = compare[side];
             const sideVersions = compare.versions[side] || [];
+            const sideCategories = categoriesWithSkills(skills, categories);
+            const activeCategory = sideCategories.some((category) => category.id === sideState.category)
+              ? sideState.category
+              : '';
             const visibleSkills = skills.filter(
-              (skill) => !sideState.category || skill.category === sideState.category,
+              (skill) => !activeCategory || skill.category === activeCategory,
             );
             return h(
               'div',
@@ -1231,12 +1361,12 @@ window.__ModuleLoader__.load({
                 'select',
                 {
                   style: Object.assign({}, styles.select, { width: '100%', marginTop: 8 }),
-                  value: sideState.category,
+                  value: activeCategory,
                   onChange: (event) =>
                     setCompareSide(side, { category: event.target.value, skill: '', label: '' }),
                 },
                 h('option', { value: '' }, t('allCategories')),
-                categories.map((category) =>
+                sideCategories.map((category) =>
                   h(
                     'option',
                     { key: category.id, value: category.id },
@@ -1251,7 +1381,7 @@ window.__ModuleLoader__.load({
                   value: sideState.skill,
                   onChange: (event) => setCompareSide(side, { skill: event.target.value, label: '' }),
                 },
-                h('option', { value: '' }, '—'),
+                h('option', { value: '' }, visibleSkills.length === 0 ? t('nothingFound') : '—'),
                 visibleSkills.map((skill) => h('option', { key: skill.name, value: skill.name }, skill.name)),
               ),
               h(
@@ -1661,8 +1791,12 @@ window.__ModuleLoader__.load({
           }
           const budget = data.totalWeight + (data.catalogOverhead || 0);
           const term = skillSearch.trim().toLowerCase();
+          const filterCategories = categoriesWithSkills(data.skills, data.categories);
+          const activeFilter = filterCategories.some((category) => category.id === skillCategory)
+            ? skillCategory
+            : '';
           const visible = data.skills.filter((skill) => {
-            const byCategory = !skillCategory || skill.category === skillCategory;
+            const byCategory = !activeFilter || skill.category === activeFilter;
             const byName =
               term === '' ||
               skill.name.toLowerCase().includes(term) ||
@@ -1735,11 +1869,11 @@ window.__ModuleLoader__.load({
                 'select',
                 {
                   style: styles.select,
-                  value: skillCategory,
+                  value: activeFilter,
                   onChange: (event) => setSkillCategory(event.target.value),
                 },
                 h('option', { value: '' }, t('allCategories')),
-                (data.categories || []).map((category) =>
+                filterCategories.map((category) =>
                   h(
                     'option',
                     { key: category.id, value: category.id },
@@ -1868,6 +2002,66 @@ window.__ModuleLoader__.load({
           );
         };
 
+        const renderPreview = () => {
+          if (!preview) return null;
+          const entry = preview.entry;
+          const text = catalogText(entry);
+          const installed = Boolean(entry.installed);
+          return h(
+            'div',
+            {
+              style: styles.modalBackdrop,
+              role: 'presentation',
+              onClick: (event) => {
+                if (event.target === event.currentTarget) setPreview(null);
+              },
+            },
+            h(
+              'div',
+              { style: styles.modal, role: 'dialog', 'aria-modal': 'true', 'aria-label': text.title },
+              h(
+                'div',
+                { style: styles.modalHeader },
+                h('div', { style: styles.name }, text.title),
+                h(
+                  'div',
+                  { style: styles.modalMeta },
+                  `${entry.name} · ${t('previewSource')}: ${entry.source.repo}/${entry.source.path}`,
+                ),
+                h('div', { style: styles.description }, text.description),
+              ),
+              h(
+                'div',
+                { style: styles.modalBody },
+                preview.status === 'loading'
+                  ? h('div', { style: styles.note }, t('loading'))
+                  : preview.status === 'error'
+                    ? h('div', { style: styles.error }, preview.error)
+                    : h('pre', { style: styles.pre }, preview.content),
+              ),
+              h(
+                'div',
+                { style: styles.formActions },
+                h('button', { style: styles.button, onClick: () => setPreview(null) }, t('close')),
+                preview.status === 'ready'
+                  ? h(
+                      'button',
+                      {
+                        style: Object.assign({}, styles.button, styles.primary),
+                        disabled: installed || busy === entry.id,
+                        onClick: () => {
+                          setPreview(null);
+                          install([entry.id]);
+                        },
+                      },
+                      installed ? t('installedBadge') : t('install'),
+                    )
+                  : null,
+              ),
+            ),
+          );
+        };
+
         const renderCatalog = () => {
           if (catalogState.status === 'loading' || catalogState.status === 'idle') {
             return h('div', { style: styles.note }, t('catalogLoading'));
@@ -1945,7 +2139,18 @@ window.__ModuleLoader__.load({
                       { key: entry.id, style: styles.row },
                       h(
                         'div',
-                        { style: styles.rowMain },
+                        {
+                          style: Object.assign({}, styles.rowMain, styles.rowClickable),
+                          role: 'button',
+                          tabIndex: 0,
+                          onClick: () => openPreview(entry),
+                          onKeyDown: (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              openPreview(entry);
+                            }
+                          },
+                        },
                         h('div', { style: styles.name }, text.title),
                         h('div', { style: styles.description }, text.description),
                         h('div', { style: Object.assign({}, styles.note, styles.mono) }, entry.name),
@@ -2006,13 +2211,25 @@ window.__ModuleLoader__.load({
                 onChange: (event) => setPathDraft(event.target.value),
                 onKeyDown: (event) => {
                   if (event.key === 'Enter') {
-                    loadSkills(pathDraft.trim() || undefined);
-                    if (tab === 'catalog') loadCatalog(pathDraft.trim() || undefined);
+                    event.preventDefault();
+                    loadFromPath();
                   }
                 },
               }),
-              h('button', { style: styles.button, onClick: () => loadSkills(pathDraft.trim() || undefined) }, t('load')),
-              h('button', { style: Object.assign({}, styles.button, styles.primary), onClick: refresh }, t('refresh')),
+              h(
+                'button',
+                { style: styles.button, disabled: refreshing, onClick: loadFromPath },
+                refreshing ? t('loading') : t('load'),
+              ),
+              h(
+                'button',
+                {
+                  style: Object.assign({}, styles.button, styles.primary),
+                  disabled: refreshing,
+                  onClick: refresh,
+                },
+                refreshing ? t('loading') : t('refresh'),
+              ),
             ),
             h(
               'div',
@@ -2045,6 +2262,7 @@ window.__ModuleLoader__.load({
             notice
               ? h('div', { style: notice.kind === 'error' ? styles.noticeError : styles.notice }, notice.text)
               : null,
+            renderPreview(),
             tab === 'installed' ? (editor ? renderEditor() : null) : null,
             tab === 'installed' ? (versions ? renderVersions() : null) : null,
             tab === 'installed' ? renderInstalled() : tab === 'catalog' ? renderCatalog() : renderCompare(),
