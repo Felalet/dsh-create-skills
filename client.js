@@ -934,19 +934,29 @@ window.__ModuleLoader__.load({
     }
 
     function openSkillsFor(ctx, path) {
-      pendingWorkspacePath = path;
-      for (const listener of workspaceListeners) {
-        try {
-          listener(path);
-        } catch {
-          // one broken listener must not block the others
+      pendingWorkspacePath = path || null;
+      if (path) {
+        for (const listener of workspaceListeners) {
+          try {
+            listener(path);
+          } catch {
+            // one broken listener must not block the others
+          }
         }
       }
       try {
         if (ctx.layout && typeof ctx.layout.selectPanel === 'function') ctx.layout.selectPanel('create-skills');
-      } catch {
-        // the page can still be opened from the sidebar
+      } catch (error) {
+        trackEvent('menu-open-failed', error instanceof Error ? error.message : String(error));
       }
+    }
+
+    function trackEvent(event, message) {
+      fetch(`${API}/client-event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ event, message: message ?? null }),
+      }).catch(() => {});
     }
 
     function makePage(t, ctx) {
@@ -3382,22 +3392,28 @@ window.__ModuleLoader__.load({
         // workspace. Guarded, because the context-menu service is optional.
         ctx.effect(() => {
           const menus = ctx.get('contextMenus');
+          trackEvent('menu-register', menus && typeof menus.register === 'function' ? 'service-ok' : 'service-missing');
           if (!menus || typeof menus.register !== 'function') return undefined;
           return menus.register({
             id: 'session.skills',
             target: 'session',
             order: 520,
-            resolve: (target) => {
-              const path = workspacePathOf(ctx, target);
-              if (!path) return [];
-              return [
-                {
-                  id: 'skills',
-                  label: tr('title'),
-                  run: () => openSkillsFor(ctx, path),
+            // The item stays visible even when the workspace path is unknown:
+            // clicking it then just opens the page.
+            resolve: (target) => [
+              {
+                id: 'skills',
+                label: tr('title'),
+                run: () => {
+                  const path = workspacePathOf(ctx, target);
+                  trackEvent(
+                    'menu-run',
+                    `${target ? Object.keys(target).join(',') : 'no-target'} -> ${path || 'no-path'}`,
+                  );
+                  openSkillsFor(ctx, path);
                 },
-              ];
-            },
+              },
+            ],
           });
         }, 'create-skills: session menu');
       },
