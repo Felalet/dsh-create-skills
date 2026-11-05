@@ -108,6 +108,8 @@ window.__ModuleLoader__.load({
       chooseLeft: 'Выбрать левый',
       chooseRight: 'Выбрать правый',
       comparePick: 'Выберите скиллы слева и справа',
+      compareCatalogHint:
+        'Сравнивать можно и скиллы из каталога: они помечены «Каталог» и не требуют установки.',
       allCategories: 'Все категории',
       catBuiltin: 'Встроенные',
       catMine: 'Мои скиллы',
@@ -250,6 +252,8 @@ window.__ModuleLoader__.load({
       chooseLeft: 'Choose left',
       chooseRight: 'Choose right',
       comparePick: 'Pick a skill on both sides',
+      compareCatalogHint:
+        'Catalog skills can be compared too: they are marked "Catalog" and need no installation.',
       allCategories: 'All categories',
       catBuiltin: 'Bundled',
       catMine: 'My skills',
@@ -392,6 +396,7 @@ window.__ModuleLoader__.load({
       chooseLeft: '选择左侧',
       chooseRight: '选择右侧',
       comparePick: '请在左右两侧各选择一个技能',
+      compareCatalogHint: '也可以对比技能库中的技能：它们标有「技能库」，无需安装。',
       allCategories: '全部分类',
       catBuiltin: '内置',
       catMine: '我的技能',
@@ -1702,6 +1707,7 @@ window.__ModuleLoader__.load({
               sideCard('left', 'A'),
               sideCard('right', 'B'),
             ),
+            h('div', { style: styles.note }, t('compareCatalogHint')),
             h(
               'label',
               { style: styles.field },
