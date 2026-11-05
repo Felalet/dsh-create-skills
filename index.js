@@ -9,10 +9,14 @@ import process from 'node:process';
 import { homedir } from 'node:os';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const PREFIX = '/plugins/create-skills/';
+const CATALOG_PATH = fileURLToPath(new URL('./catalog/catalog.json', import.meta.url));
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const WRITABLE = new Set(['project-dsh', 'project-agents', 'user-dsh', 'user-agents', 'custom']);
+const MAX_ARCHIVE_BYTES = 20 * 1024 * 1024;
 
 // Diagnostics for the page itself: proves the browser actually called the API.
 const stats = { requests: 0, lastAt: null, lastUserAgent: null, lastProjectRoot: null, mounted: false, events: [] };
@@ -367,6 +371,129 @@ function errorResponse(res, error) {
   sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
 }
 
+function readTarString(header, offset, length) {
+  const slice = header.subarray(offset, offset + length);
+  const zero = slice.indexOf(0);
+  return slice.subarray(0, zero === -1 ? slice.length : zero).toString('utf8');
+}
+
+function parseTar(buffer) {
+  const entries = [];
+  let offset = 0;
+  while (offset + 512 <= buffer.length) {
+    const header = buffer.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const name = readTarString(header, 0, 100);
+    const prefix = readTarString(header, 345, 155);
+    const size = Number.parseInt(readTarString(header, 124, 12).trim() || '0', 8);
+    const type = String.fromCharCode(header[156] || 48);
+    const start = offset + 512;
+    entries.push({ name: prefix ? `${prefix}/${name}` : name, type, data: buffer.subarray(start, start + size) });
+    offset = start + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+async function downloadSkill(entry) {
+  const url = `https://codeload.github.com/${entry.source.repo}/tar.gz/${entry.source.ref}`;
+  const response = await fetch(url, { headers: { 'user-agent': 'create-skills/0.1' } });
+  if (!response.ok) throw new HttpError(502, `download failed: HTTP ${response.status} for ${entry.source.repo}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > MAX_ARCHIVE_BYTES) throw new HttpError(413, 'archive is too large');
+  return parseTar(gunzipSync(buffer));
+}
+
+function skillPrefix(entries, path) {
+  const suffix = `${path}/SKILL.md`;
+  const hit = entries.find((candidate) => candidate.name === suffix || candidate.name.endsWith(`/${suffix}`));
+  if (!hit) throw new HttpError(422, `SKILL.md not found at ${path}`);
+  return hit.name.slice(0, hit.name.length - 'SKILL.md'.length);
+}
+
+async function installEntry(entry, targetRoot) {
+  if (typeof entry.name !== 'string' || !KEBAB.test(entry.name)) {
+    throw new HttpError(422, `catalog entry ${entry.id} has an invalid name`);
+  }
+  const target = join(targetRoot, entry.name);
+  if (await exists(target)) return { id: entry.id, status: 'skipped', reason: 'already installed' };
+
+  const entries = await downloadSkill(entry);
+  const prefix = skillPrefix(entries, entry.source.path);
+  await mkdir(target, { recursive: true });
+  try {
+    for (const item of entries) {
+      if (!item.name.startsWith(prefix)) continue;
+      const relative = item.name.slice(prefix.length);
+      if (relative === '' || relative.includes('..') || relative.startsWith('/')) continue;
+      const destination = join(target, relative);
+      assertInside(destination, [target]);
+      if (item.type === '5') {
+        await mkdir(destination, { recursive: true });
+      } else if (item.type === '0') {
+        await mkdir(dirname(destination), { recursive: true });
+        await writeFile(destination, item.data);
+      }
+    }
+  } catch (error) {
+    await rm(target, { recursive: true, force: true });
+    throw error;
+  }
+
+  const file = join(target, 'SKILL.md');
+  if (!(await exists(file))) {
+    await rm(target, { recursive: true, force: true });
+    throw new HttpError(422, 'downloaded skill has no SKILL.md');
+  }
+  const parsed = splitFrontmatter(await readFile(file, 'utf8'));
+  if (!parsed.fields.name || !parsed.fields.description) {
+    await rm(target, { recursive: true, force: true });
+    throw new HttpError(422, 'downloaded skill has an invalid frontmatter');
+  }
+  return { id: entry.id, status: 'installed', path: target };
+}
+
+async function listCatalog(ctx, url, res) {
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+  const snapshot = await readSnapshot(ctx, view);
+  const installed = new Set(snapshot.skills.map((skill) => skill.name));
+  sendJson(res, 200, {
+    projectRoot: view.cwd,
+    categories: catalog.categories,
+    skills: catalog.skills.map((entry) => ({ ...entry, installed: installed.has(entry.name) })),
+  });
+}
+
+async function installCatalogSkills(ctx, view, body, res) {
+  const ids = Array.isArray(body.ids) ? body.ids : [];
+  if (ids.length === 0) throw new HttpError(400, 'ids is required');
+  const scope = body.scope === 'user' ? 'user' : 'project';
+  const catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+  const projectRoot = await findProjectRoot(view.cwd);
+  const targetRoot = scope === 'user' ? join(dshHome(), 'skills') : join(projectRoot, '.dsh', 'skills');
+  assertInside(targetRoot, allowedRoots(projectRoot));
+
+  const report = [];
+  for (const id of ids) {
+    const entry = catalog.skills.find((candidate) => candidate.id === id);
+    if (!entry) {
+      report.push({ id, status: 'error', message: 'unknown catalog entry' });
+      continue;
+    }
+    try {
+      report.push(await installEntry(entry, targetRoot));
+    } catch (error) {
+      report.push({ id, status: 'error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  sendJson(res, 200, {
+    ok: true,
+    scope,
+    installed: report.filter((item) => item.status === 'installed').length,
+    report,
+  });
+}
+
 export function apply(ctx) {
   const routes = [
     {
@@ -398,6 +525,35 @@ export function apply(ctx) {
             return;
           }
           sendJson(res, 405, { error: 'method not allowed' });
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/catalog`,
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          await listCatalog(ctx, url, res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/install`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await installCatalogSkills(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }
