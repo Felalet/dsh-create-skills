@@ -1319,13 +1319,19 @@ async function compareVariants(ctx, view, body, res) {
   });
 }
 
-function buildImprovePrompt(body, task) {
+function buildImprovePrompt(body, task, instruction) {
   const clip = body.length > 12_000 ? body.slice(0, 12_000) : body;
   const lines = [
     'Ты — опытный редактор инструкций для ИИ-агента (скилл в формате Markdown).',
     'Улучши инструкции: сделай шаги конкретнее, добавь недостающие проверки, убери воду, сохрани назначение и стиль.',
   ];
   if (task !== '') lines.push(`Цель, под которую улучшаем: ${task}.`);
+  if (instruction !== '') {
+    lines.push(
+      `Что именно нужно изменить или добавить: ${instruction}.`,
+      'Встрой это в инструкции в подходящем месте (шаги, правила, проверка готовности), не переписывая остальное без необходимости.',
+    );
+  }
   lines.push(
     'Верни ТОЛЬКО улучшенный Markdown без frontmatter, без пояснений и без обёртки ```.',
     '',
@@ -1348,10 +1354,11 @@ async function improveSkill(ctx, view, body, res) {
   });
   const parsed = splitFrontmatter(original.raw);
   const task = typeof body.task === 'string' ? body.task.trim() : '';
+  const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : '';
   const text = await streamModel(
     ctx,
     'Ты — опытный редактор инструкций для ИИ-агентов. Возвращай только Markdown.',
-    buildImprovePrompt(parsed.body, task),
+    buildImprovePrompt(parsed.body, task, instruction),
     4000,
   );
   const improvedBody = stripFences(text);

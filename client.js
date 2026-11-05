@@ -125,6 +125,9 @@ window.__ModuleLoader__.load({
       archiveDone: 'В архив',
       compareTask: 'Задача для сравнения (необязательно)',
       compareTaskPlaceholder: 'Например: подготовить квартальный отчёт с таблицей',
+      improveWhat: 'Что улучшить (необязательно)',
+      improveWhatPlaceholder:
+        'Например: диаграммы строить в web-версии и подготавливать страницу для просмотра',
       runCompare: 'Сравнить',
       comparing: 'Сравниваем…',
       improve: 'Улучшить скилл',
@@ -294,6 +297,9 @@ window.__ModuleLoader__.load({
       archiveDone: 'Archived',
       compareTask: 'Task to compare on (optional)',
       compareTaskPlaceholder: 'For example: prepare a quarterly report with a table',
+      improveWhat: 'What to improve (optional)',
+      improveWhatPlaceholder:
+        'For example: render diagrams for the web version and prepare a page to view them',
       runCompare: 'Compare',
       comparing: 'Comparing…',
       improve: 'Improve skill',
@@ -462,6 +468,8 @@ window.__ModuleLoader__.load({
       archiveDone: '已移到回收站',
       compareTask: '用于对比的任务（可选）',
       compareTaskPlaceholder: '例如：准备一份带表格的季度报告',
+      improveWhat: '要改进什么（可选）',
+      improveWhatPlaceholder: '例如：为网页版绘制图表并准备一个查看页面',
       runCompare: '对比',
       comparing: '正在对比…',
       improve: '优化技能',
@@ -927,6 +935,7 @@ window.__ModuleLoader__.load({
           left: { category: '', skill: '', catalogId: '', label: '' },
           right: { category: '', skill: '', catalogId: '', label: '' },
           task: '',
+          improvement: '',
           busy: false,
           error: null,
           result: null,
@@ -950,6 +959,8 @@ window.__ModuleLoader__.load({
         const [sidePreview, setSidePreview] = React.useState(null);
         // Feedback next to the "Choose" button, so an apply is visible in place.
         const [appliedNotice, setAppliedNotice] = React.useState(null);
+        // The skill last opened in the editor; Compare picks it up on open.
+        const [lastSkill, setLastSkill] = React.useState(null);
         // Catalog preview: fetched on demand, so installing is a separate decision.
         const [preview, setPreview] = React.useState(null);
         // The editor and the versions panel render above the list; bumping this
@@ -1062,6 +1073,25 @@ window.__ModuleLoader__.load({
             .then((body) => setWorkspaces(Array.isArray(body.workspaces) ? body.workspaces : []))
             .catch(() => {});
         }, []);
+
+        const prefillRef = React.useRef(null);
+        React.useEffect(() => {
+          if (tab !== 'compare' || !lastSkill) return;
+          // Prefill once per edited skill: a manual choice in Compare survives
+          // tab switches until another skill is opened for editing.
+          if (prefillRef.current === lastSkill) return;
+          prefillRef.current = lastSkill;
+          const next = {
+            category: lastSkill.category || '',
+            skill: lastSkill.name,
+            catalogId: lastSkill.catalogId || '',
+            label: '',
+          };
+          setCompare((current) => Object.assign({}, current, { left: next }));
+          loadSidePreview('left', next);
+          if (!next.catalogId) loadCompareVersions('left', next.name);
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [tab, lastSkill]);
 
         React.useEffect(() => {
           if (tab !== 'catalog') return;
@@ -1179,6 +1209,7 @@ window.__ModuleLoader__.load({
 
         const openEdit = async (skill) => {
           track('edit', skill.name);
+          setLastSkill({ name: skill.name, category: skill.category || '', catalogId: '' });
           setCategoryDraft(null);
           setBusy(skill.name);
           try {
@@ -1230,6 +1261,7 @@ window.__ModuleLoader__.load({
                 body: JSON.stringify({ ...payload, scope: editor.scope }),
               });
               setNotice({ kind: 'ok', text: t('created') });
+              setLastSkill({ name: payload.name, category: editor.category || '', catalogId: '' });
             } else {
               await api('/skills', {
                 method: 'PATCH',
@@ -1627,6 +1659,7 @@ window.__ModuleLoader__.load({
                 label: compare.left.label || undefined,
                 catalogId: compare.left.catalogId || undefined,
                 task: compare.task,
+                instruction: compare.improvement,
               }),
             });
             setCompare((current) =>
@@ -2090,6 +2123,18 @@ window.__ModuleLoader__.load({
                 value: compare.task,
                 placeholder: t('compareTaskPlaceholder'),
                 onChange: (event) => setCompare((current) => Object.assign({}, current, { task: event.target.value })),
+              }),
+            ),
+            h(
+              'label',
+              { style: styles.field },
+              h('span', { style: styles.fieldLabel }, t('improveWhat')),
+              h('textarea', {
+                style: Object.assign({}, styles.textarea, { minHeight: 70, fontFamily: 'inherit' }),
+                value: compare.improvement,
+                placeholder: t('improveWhatPlaceholder'),
+                onChange: (event) =>
+                  setCompare((current) => Object.assign({}, current, { improvement: event.target.value })),
               }),
             ),
             compare.error ? h('div', { style: styles.error }, compare.error) : null,
