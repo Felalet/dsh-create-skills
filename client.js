@@ -53,6 +53,16 @@ window.__ModuleLoader__.load({
       scope: 'Куда сохранить',
       category: 'Категория',
       noCategory: 'Без категории',
+      newCategory: 'Своя категория',
+      newCategoryPrompt: 'Название новой категории',
+      suggestCategory: 'ИИ подберёт категорию',
+      createCategoryConfirm: 'Создать категорию',
+      groupTask: 'Задача',
+      groupTaskPlaceholder: 'Например: запустить лендинг',
+      groupRun: 'Сгруппировать под задачу',
+      groupReset: 'Обычный вид',
+      groupOthers: 'Остальные',
+      grouping: 'Раскладываем…',
       searchPlaceholder: 'Поиск по имени',
       nothingFound: 'Ничего не найдено',
       scopeProject: 'в проект',
@@ -147,6 +157,16 @@ window.__ModuleLoader__.load({
       scope: 'Save to',
       category: 'Category',
       noCategory: 'No category',
+      newCategory: 'New category',
+      newCategoryPrompt: 'New category name',
+      suggestCategory: 'Let AI pick a category',
+      createCategoryConfirm: 'Create category',
+      groupTask: 'Task',
+      groupTaskPlaceholder: 'For example: launch a landing page',
+      groupRun: 'Group for the task',
+      groupReset: 'Normal view',
+      groupOthers: 'Other skills',
+      grouping: 'Grouping…',
       searchPlaceholder: 'Search by name',
       nothingFound: 'Nothing found',
       scopeProject: 'project',
@@ -499,6 +519,9 @@ window.__ModuleLoader__.load({
         const [installScope, setInstallScope] = React.useState('project');
         const [skillSearch, setSkillSearch] = React.useState('');
         const [skillCategory, setSkillCategory] = React.useState('');
+        const [groupTask, setGroupTask] = React.useState('');
+        const [groups, setGroups] = React.useState(null);
+        const [grouping, setGrouping] = React.useState(false);
 
         const loadSkills = React.useCallback(async (cwd) => {
           setSkillsState({ status: 'loading' });
@@ -896,6 +919,67 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const createCategory = async (title) => {
+          const created = await api('/categories', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title }),
+          });
+          await loadSkills(pathDraft.trim() || undefined);
+          return created.id;
+        };
+
+        const createCategoryPrompt = async () => {
+          const title = window.prompt(t('newCategoryPrompt'));
+          if (!title || title.trim() === '') return;
+          try {
+            const id = await createCategory(title.trim());
+            setEditor((current) => (current ? Object.assign({}, current, { category: id }) : current));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setEditor((current) => (current ? Object.assign({}, current, { error: message }) : current));
+          }
+        };
+
+        const suggestEditorCategory = async () => {
+          if (!editor) return;
+          try {
+            const suggestion = await api('/suggest-category', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name: editor.name, description: editor.description, content: editor.content }),
+            });
+            if (suggestion.categoryId) {
+              setEditor((current) => (current ? Object.assign({}, current, { category: suggestion.categoryId }) : current));
+              return;
+            }
+            if (suggestion.newTitle && window.confirm(`${t('createCategoryConfirm')} «${suggestion.newTitle}»?`)) {
+              const id = await createCategory(suggestion.newTitle);
+              setEditor((current) => (current ? Object.assign({}, current, { category: id }) : current));
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setEditor((current) => (current ? Object.assign({}, current, { error: message }) : current));
+          }
+        };
+
+        const runGrouping = async () => {
+          if (groupTask.trim() === '') return;
+          setGrouping(true);
+          try {
+            const body = await api('/group', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ task: groupTask.trim() }),
+            });
+            setGroups(Array.isArray(body.groups) ? body.groups : []);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setGrouping(false);
+          }
+        };
+
         const renderCompare = () => {
           const skills = data ? data.skills : [];
           const categories = data && data.categories ? data.categories : [];
@@ -1145,6 +1229,20 @@ window.__ModuleLoader__.load({
               ),
             ),
             h(
+              'div',
+              { style: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' } },
+              h(
+                'button',
+                { style: Object.assign({}, styles.button, styles.small), onClick: createCategoryPrompt },
+                `+ ${t('newCategory')}`,
+              ),
+              h(
+                'button',
+                { style: Object.assign({}, styles.button, styles.small), onClick: suggestEditorCategory },
+                t('suggestCategory'),
+              ),
+            ),
+            h(
               'label',
               { style: styles.field },
               h('span', { style: styles.fieldLabel }, t('description')),
@@ -1296,6 +1394,55 @@ window.__ModuleLoader__.load({
               (skill.description || '').toLowerCase().includes(term);
             return byCategory && byName;
           });
+
+          const renderGrouped = () => {
+            const byName = new Map(data.skills.map((skill) => [skill.name, skill]));
+            const used = new Set();
+            const sections = groups
+              .map((group) => {
+                const items = group.skills.map((name) => byName.get(name)).filter(Boolean);
+                for (const item of items) used.add(item.name);
+                return { title: group.title, items };
+              })
+              .filter((section) => section.items.length > 0);
+            const rest = data.skills.filter((skill) => !used.has(skill.name));
+            if (rest.length > 0) sections.push({ title: t('groupOthers'), items: rest });
+            return h(
+              'div',
+              null,
+              sections.map((section) =>
+                h(
+                  'div',
+                  { key: section.title },
+                  h('div', { style: styles.sectionTitle }, section.title),
+                  h(
+                    'div',
+                    { style: styles.list },
+                    section.items.map((skill) =>
+                      h(
+                        'div',
+                        { key: skill.name, style: styles.row },
+                        h(
+                          'div',
+                          { style: styles.rowMain },
+                          h('div', { style: styles.name }, skill.name),
+                          h('div', { style: styles.description }, skill.description),
+                        ),
+                        h(
+                          'div',
+                          { style: styles.rowSide },
+                          skill.category
+                            ? h('span', { style: styles.badge }, categoryLabel(t, skill.category, data.categories))
+                            : null,
+                          h('span', { style: Object.assign({}, styles.badge, styles.mono) }, `~${skill.weight} tok`),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          };
           return h(
             'div',
             null,
@@ -1328,6 +1475,25 @@ window.__ModuleLoader__.load({
             ),
             h(
               'div',
+              { style: Object.assign({}, styles.toolbar, { marginTop: 8 }) },
+              h('input', {
+                style: Object.assign({}, styles.input, { flex: '1 1 200px' }),
+                value: groupTask,
+                placeholder: t('groupTaskPlaceholder'),
+                spellCheck: false,
+                onChange: (event) => setGroupTask(event.target.value),
+              }),
+              h(
+                'button',
+                { style: styles.button, disabled: grouping, onClick: runGrouping },
+                grouping ? t('grouping') : t('groupRun'),
+              ),
+              groups
+                ? h('button', { style: styles.button, onClick: () => setGroups(null) }, t('groupReset'))
+                : null,
+            ),
+            h(
+              'div',
               { style: styles.summary },
               h('span', { style: styles.chip }, `${data.skills.length} ${t('skills')}`),
               h('span', { style: styles.chip }, `~${budget} ${t('tokens')}`),
@@ -1340,10 +1506,21 @@ window.__ModuleLoader__.load({
                   `${t('budgetOver')}: ~${budget} ${t('tokens')}. ${t('budgetHint')}`,
                 )
               : null,
-            visible.length === 0 ? h('div', { style: styles.note }, t('nothingFound')) : null,
+            groups && groups.length > 0 ? renderGrouped() : null,
+            groups && groups.length > 0
+              ? null
+              : visible.length === 0
+                ? h('div', { style: styles.note }, t('nothingFound'))
+                : null,
             h(
               'div',
-              { style: styles.list },
+              {
+                style: Object.assign(
+                  {},
+                  styles.list,
+                  groups && groups.length > 0 ? { display: 'none' } : null,
+                ),
+              },
               visible.map((skill) =>
                 h(
                   'div',

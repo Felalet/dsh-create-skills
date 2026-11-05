@@ -199,16 +199,73 @@ async function readSnapshot(ctx, view) {
   return snapshot;
 }
 
-async function listSkills(ctx, req, url, res) {
-  const view = await resolveView(ctx, url.searchParams.get('cwd'));
-  const snapshot = await readSnapshot(ctx, view);
+function slugifyCategory(text) {
+  const map = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
+    к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+    х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  };
+  return String(text)
+    .toLowerCase()
+    .split('')
+    .map((char) => (char in map ? map[char] : char))
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
 
+function categoriesPath(projectRoot) {
+  return join(projectRoot, '.dsh', 'skill-categories.json');
+}
+
+async function readCustomCategories(projectRoot) {
+  try {
+    const parsed = JSON.parse(await readFile(categoriesPath(projectRoot), 'utf8'));
+    return Array.isArray(parsed.categories)
+      ? parsed.categories.filter((item) => item && typeof item.id === 'string' && typeof item.title === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeCustomCategories(projectRoot, categories) {
+  const file = categoriesPath(projectRoot);
+  assertInside(file, [join(projectRoot, '.dsh')]);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify({ categories }, null, 2)}\n`, 'utf8');
+}
+
+async function mergedCategories(projectRoot) {
   let catalog = { categories: [], skills: [] };
   try {
     catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
   } catch {
-    // a missing or broken catalog must not break the installed list
+    // a missing catalog only removes its categories
   }
+  const custom = await readCustomCategories(projectRoot);
+  const merged = [];
+  const seen = new Set();
+  for (const category of [
+    ...catalog.categories,
+    ...custom,
+    { id: 'builtin', title: 'Встроенные' },
+    { id: 'mine', title: 'Мои скиллы' },
+  ]) {
+    if (!category || seen.has(category.id)) continue;
+    seen.add(category.id);
+    merged.push({ id: category.id, title: category.title });
+  }
+  return { categories: merged, catalog };
+}
+
+async function listSkills(ctx, req, url, res) {
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const snapshot = await readSnapshot(ctx, view);
+
+  const projectRoot = await findProjectRoot(view.cwd);
+  const { categories, catalog } = await mergedCategories(projectRoot);
   const categoryOf = new Map(catalog.skills.map((entry) => [entry.name, entry.category]));
 
   const rows = [];
@@ -225,12 +282,6 @@ async function listSkills(ctx, req, url, res) {
     row.category = own || categoryOf.get(row.name) || (row.source === 'bundled' ? 'builtin' : 'mine');
     rows.push(row);
   }
-
-  const categories = [
-    ...catalog.categories,
-    { id: 'builtin', title: 'Встроенные' },
-    { id: 'mine', title: 'Мои скиллы' },
-  ];
 
   stats.requests += 1;
   stats.lastAt = new Date().toISOString();
@@ -844,6 +895,125 @@ async function improveSkill(ctx, view, body, res) {
   });
 }
 
+function parseJsonObject(text) {
+  const match = /\{[\s\S]*\}/.exec(text);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+async function listCategories(ctx, url, res) {
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const projectRoot = await findProjectRoot(view.cwd);
+  const { categories } = await mergedCategories(projectRoot);
+  sendJson(res, 200, { projectRoot, categories });
+}
+
+async function createCategory(ctx, view, body, res) {
+  const title = typeof body.title === 'string' ? body.title.trim().slice(0, 40) : '';
+  if (title === '') throw new HttpError(400, 'title is required');
+  const projectRoot = await findProjectRoot(view.cwd);
+  const { categories } = await mergedCategories(projectRoot);
+  const existing = categories.find((category) => category.title.toLowerCase() === title.toLowerCase());
+  if (existing) {
+    sendJson(res, 200, { id: existing.id, title: existing.title, categories });
+    return;
+  }
+  const id = slugifyCategory(title) || `cat-${Date.now()}`;
+  if (categories.some((category) => category.id === id)) throw new HttpError(409, 'category id already exists');
+  const custom = await readCustomCategories(projectRoot);
+  custom.push({ id, title });
+  await writeCustomCategories(projectRoot, custom);
+  const merged = await mergedCategories(projectRoot);
+  res.statusCode = 201;
+  sendJson(res, 201, { id, title, categories: merged.categories });
+}
+
+async function deleteCategory(ctx, url, res) {
+  const id = url.searchParams.get('id');
+  if (!id) throw new HttpError(400, 'id is required');
+  const view = await resolveView(ctx, url.searchParams.get('cwd'));
+  const projectRoot = await findProjectRoot(view.cwd);
+  const custom = (await readCustomCategories(projectRoot)).filter((category) => category.id !== id);
+  await writeCustomCategories(projectRoot, custom);
+  const merged = await mergedCategories(projectRoot);
+  sendJson(res, 200, { ok: true, categories: merged.categories });
+}
+
+async function suggestCategory(ctx, view, body, res) {
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  if (name === '' && description === '') throw new HttpError(400, 'name or description is required');
+  const projectRoot = await findProjectRoot(view.cwd);
+  const { categories } = await mergedCategories(projectRoot);
+  const list = categories
+    .filter((category) => category.id !== 'builtin' && category.id !== 'mine')
+    .map((category) => `${category.id} — ${category.title}`)
+    .join('\n');
+  const content = typeof body.content === 'string' ? body.content.slice(0, 3000) : '';
+  const prompt = [
+    'Выбери категорию для скилла или предложи новую короткую категорию.',
+    'Существующие категории (id — название):',
+    list,
+    '',
+    `Скилл: ${name}`,
+    `Описание: ${description}`,
+    content ? `Инструкции:\n${content}` : '',
+    '',
+    'Верни строго JSON: {"id":"существующий id"} или {"title":"Название новой категории"}.',
+  ].join('\n');
+  const text = await streamModel(ctx, 'Ты — аккуратный классификатор скиллов. Отвечай только JSON.', prompt, 300);
+  const parsed = parseJsonObject(text);
+  let categoryId = null;
+  let newTitle = null;
+  if (parsed && typeof parsed.id === 'string' && categories.some((category) => category.id === parsed.id)) {
+    categoryId = parsed.id;
+  } else if (parsed && typeof parsed.title === 'string' && parsed.title.trim() !== '') {
+    newTitle = parsed.title.trim().slice(0, 40);
+  }
+  sendJson(res, 200, { categoryId, newTitle, categories });
+}
+
+async function groupByTask(ctx, view, body, res) {
+  const task = typeof body.task === 'string' ? body.task.trim() : '';
+  if (task === '') throw new HttpError(400, 'task is required');
+  const snapshot = await readSnapshot(ctx, view);
+  const skills = snapshot.skills.map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+  }));
+  if (skills.length === 0) {
+    sendJson(res, 200, { groups: [] });
+    return;
+  }
+  const list = skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n');
+  const prompt = [
+    `Задача: ${task}`,
+    'Ниже список скиллов. Сгруппируй их под эту задачу в 3–6 групп так, чтобы было понятно, что применять на каждом шаге.',
+    'Не меняй сами категории скиллов — только назови группы и распредели имена.',
+    '',
+    list,
+    '',
+    'Верни строго JSON: {"groups":[{"title":"...","skills":["name1","name2"]}]}',
+  ].join('\n');
+  const text = await streamModel(ctx, 'Ты — методист, раскладывающий инструменты под задачу. Отвечай только JSON.', prompt, 1200);
+  const parsed = parseJsonObject(text);
+  const known = new Set(skills.map((skill) => skill.name));
+  const groups = Array.isArray(parsed && parsed.groups)
+    ? parsed.groups
+        .filter((group) => group && typeof group.title === 'string' && Array.isArray(group.skills))
+        .map((group) => ({
+          title: group.title.trim().slice(0, 60),
+          skills: group.skills.filter((name) => known.has(name)),
+        }))
+        .filter((group) => group.title !== '' && group.skills.length > 0)
+    : [];
+  sendJson(res, 200, { groups });
+}
+
 export function apply(ctx) {
   const routes = [
     {
@@ -980,6 +1150,65 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await improveSkill(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/categories`,
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          if (req.method === 'GET') {
+            await listCategories(ctx, url, res);
+            return;
+          }
+          if (req.method === 'POST') {
+            await createCategory(ctx, view, await readJsonBody(req), res);
+            return;
+          }
+          if (req.method === 'DELETE') {
+            await deleteCategory(ctx, url, res);
+            return;
+          }
+          sendJson(res, 405, { error: 'method not allowed' });
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/suggest-category`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await suggestCategory(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/group`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await groupByTask(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }
