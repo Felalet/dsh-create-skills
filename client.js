@@ -82,6 +82,8 @@ window.__ModuleLoader__.load({
       openWorkspace: 'Открыть',
       copyHere: 'Скопировать сюда',
       copiedHere: 'Скопировано',
+      confirmReplace: 'Заменить здешний скилл версией из другой области',
+      confirmReplaceSome: 'Заменить существующие скиллы новыми версиями',
       collectAll: 'Собрать со всех',
       collectDone: 'Собрано',
       skipped: 'пропущено',
@@ -254,6 +256,8 @@ window.__ModuleLoader__.load({
       openWorkspace: 'Open',
       copyHere: 'Copy here',
       copiedHere: 'Copied',
+      confirmReplace: 'Replace the local skill with the version from another workspace',
+      confirmReplaceSome: 'Replace the existing skills with the newer versions',
       collectAll: 'Collect from all',
       collectDone: 'Collected',
       skipped: 'skipped',
@@ -426,6 +430,8 @@ window.__ModuleLoader__.load({
       openWorkspace: '打开',
       copyHere: '复制到这里',
       copiedHere: '已复制',
+      confirmReplace: '用其他工作区的版本替换本地技能',
+      confirmReplaceSome: '用新版本替换已有技能',
       collectAll: '全部收集',
       collectDone: '已收集',
       skipped: '已跳过',
@@ -1462,16 +1468,30 @@ window.__ModuleLoader__.load({
 
         const copyHere = async (workspace, skill) => {
           const target = pathDraft.trim();
-          setBusy(`copy:${skill.name}`);
-          try {
-            await api(`/skills/copy${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
+          const url = `/skills/copy${target ? `?cwd=${encodeURIComponent(target)}` : ''}`;
+          const send = (replace) =>
+            api(url, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ name: skill.name, from: workspace.path }),
+              body: JSON.stringify({ name: skill.name, from: workspace.path, replace }),
             });
+          setBusy(`copy:${skill.name}`);
+          try {
+            try {
+              await send(false);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              if (!message.includes('already exists')) throw error;
+              // Same name here: keep the local skill or take the remote one;
+              // the replaced copy goes to the archive.
+              if (!window.confirm(`${t('confirmReplace')}: ${skill.name} (${workspace.title})?`)) return;
+              await send(true);
+            }
             setNotice({ kind: 'ok', text: `${t('copiedHere')}: ${skill.name}` });
             await loadSkills(target || undefined, true);
             await loadCatalog(target || undefined);
+            const refreshed = await api('/workspace-skills').catch(() => null);
+            if (refreshed && Array.isArray(refreshed.workspaces)) setWorkspaceSkills(refreshed.workspaces);
           } catch (error) {
             setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
           } finally {
@@ -1482,16 +1502,29 @@ window.__ModuleLoader__.load({
         const collectAll = async () => {
           if (!window.confirm(t('confirmCollect'))) return;
           const target = pathDraft.trim();
-          setBusy('collect');
-          try {
-            const body = await api(`/skills/collect${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
+          const run = (replace) =>
+            api(`/skills/collect${target ? `?cwd=${encodeURIComponent(target)}` : ''}`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: '{}',
+              body: JSON.stringify({ replace }),
             });
+          setBusy('collect');
+          try {
+            let body = await run(false);
+            const conflicts = (body.skipped || []).filter((item) => item.reason === 'already exists');
+            if (
+              conflicts.length > 0 &&
+              window.confirm(`${t('confirmReplaceSome')}: ${conflicts.map((item) => item.name).join(', ')}?`)
+            ) {
+              const replaced = await run(true);
+              body = {
+                copied: [...(body.copied || []), ...(replaced.copied || [])],
+                skipped: replaced.skipped || [],
+              };
+            }
             setNotice({
               kind: 'ok',
-              text: `${t('collectDone')}: ${body.copied.length} · ${t('skipped')}: ${body.skipped.length}`,
+              text: `${t('collectDone')}: ${(body.copied || []).length} · ${t('skipped')}: ${(body.skipped || []).length}`,
             });
             await loadSkills(target || undefined, true);
             await loadCatalog(target || undefined);

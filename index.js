@@ -950,6 +950,19 @@ async function categoryOfFile(file) {
   }
 }
 
+// Moves an existing skill directory into the archive before it is replaced, so
+// a conflict resolution stays reversible.
+async function archiveExistingSkill(projectRoot, target, name, source) {
+  const category = await categoryOfFile(join(target, 'SKILL.md'));
+  const id = archiveEntryId(name);
+  const entryDir = join(archiveRoot(), id);
+  await mkdir(entryDir, { recursive: true });
+  const meta = { id, name, source, category, archivedAt: new Date().toISOString(), origin: target };
+  await writeFile(join(entryDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  await movePath(target, join(entryDir, 'skill'));
+  return id;
+}
+
 async function copySkillToWorkspace(ctx, view, body, res) {
   const name = typeof body.name === 'string' ? body.name : '';
   validateName(name);
@@ -966,7 +979,12 @@ async function copySkillToWorkspace(ctx, view, body, res) {
   const targetRoot = join(projectRoot, '.dsh', 'skills');
   assertInside(targetRoot, allowedRoots(projectRoot));
   const target = join(targetRoot, name);
-  if (await exists(target)) throw new HttpError(409, `skill "${name}" already exists in this workspace`);
+  if (await exists(target)) {
+    if (body.replace !== true) {
+      throw new HttpError(409, `skill "${name}" already exists in this workspace`);
+    }
+    await archiveExistingSkill(projectRoot, target, name, 'project-dsh');
+  }
   await cp(source, target, { recursive: true });
   const category = await categoryOfFile(join(target, 'SKILL.md'));
   if (category) {
@@ -993,7 +1011,7 @@ async function pickFolder(ctx, res) {
 
 // Copies every project skill of every other workspace into the current one,
 // skipping names that already exist here.
-async function collectSkills(ctx, view, res) {
+async function collectSkills(ctx, view, body, res) {
   const projectRoot = await findProjectRoot(view.cwd);
   const targetRoot = join(projectRoot, '.dsh', 'skills');
   assertInside(targetRoot, allowedRoots(projectRoot));
@@ -1015,8 +1033,11 @@ async function collectSkills(ctx, view, res) {
       if (!(await exists(join(source, 'SKILL.md')))) continue;
       const target = join(targetRoot, entry.name);
       if (await exists(target)) {
-        skipped.push({ name: entry.name, from: workspace.title, reason: 'already exists' });
-        continue;
+        if (!body || body.replace !== true) {
+          skipped.push({ name: entry.name, from: workspace.title, reason: 'already exists' });
+          continue;
+        }
+        await archiveExistingSkill(projectRoot, target, entry.name, 'project-dsh');
       }
       await cp(source, target, { recursive: true });
       const category = await categoryOfFile(join(target, 'SKILL.md'));
@@ -1814,7 +1835,7 @@ export function apply(ctx) {
           }
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
-          await collectSkills(ctx, view, res);
+          await collectSkills(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }
