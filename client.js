@@ -18,6 +18,8 @@ window.__ModuleLoader__.load({
       newSkill: 'Новый скилл',
       refresh: 'Обновить',
       load: 'Загрузить',
+      chooseFolder: 'Выбрать папку…',
+      recentPlaces: 'Недавние',
       pathPlaceholder: 'Путь к проекту',
       loading: 'Загрузка…',
       saving: 'Сохраняем…',
@@ -174,6 +176,8 @@ window.__ModuleLoader__.load({
       newSkill: 'New skill',
       refresh: 'Refresh',
       load: 'Load',
+      chooseFolder: 'Choose folder…',
+      recentPlaces: 'Recent',
       pathPlaceholder: 'Project path',
       loading: 'Loading…',
       saving: 'Saving…',
@@ -330,6 +334,8 @@ window.__ModuleLoader__.load({
       newSkill: '新建技能',
       refresh: '刷新',
       load: '加载',
+      chooseFolder: '选择文件夹…',
+      recentPlaces: '最近',
       pathPlaceholder: '项目路径',
       loading: '加载中…',
       saving: '正在保存…',
@@ -677,6 +683,26 @@ window.__ModuleLoader__.load({
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    // Recent project paths, kept in the browser so switching between workspaces
+    // is one click instead of retyping a path.
+    const RECENT_PATHS_KEY = 'create-skills:recent-paths';
+
+    function readRecentPaths() {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(RECENT_PATHS_KEY) || '[]');
+        return Array.isArray(parsed)
+          ? parsed.filter((item) => typeof item === 'string').slice(0, 5)
+          : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function shortPath(path) {
+      const parts = String(path).split(/[\\/]+/).filter(Boolean);
+      return parts.length > 1 ? parts.slice(-2).join('\\') : String(path);
+    }
+
     function uiLang() {
       const lang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
       const tag = String(lang).toLowerCase();
@@ -857,6 +883,8 @@ window.__ModuleLoader__.load({
         const [archiveState, setArchiveState] = React.useState({ status: 'idle', entries: [] });
         const [workspaces, setWorkspaces] = React.useState([]);
         const [workspaceSkills, setWorkspaceSkills] = React.useState([]);
+        const [recentPaths, setRecentPaths] = React.useState(readRecentPaths);
+        const [pickingFolder, setPickingFolder] = React.useState(false);
         const [pathDraft, setPathDraft] = React.useState('');
         const [editor, setEditor] = React.useState(null);
         const [busy, setBusy] = React.useState(null);
@@ -917,6 +945,20 @@ window.__ModuleLoader__.load({
           return () => window.removeEventListener('keydown', onKey);
         }, [preview, editor, versions]);
 
+        const rememberPath = (value) => {
+          const next = String(value || '').trim();
+          if (next === '') return;
+          setRecentPaths((current) => {
+            const list = [next, ...current.filter((item) => item !== next)].slice(0, 5);
+            try {
+              window.localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
+            } catch {
+              // private mode: keep the in-memory list only
+            }
+            return list;
+          });
+        };
+
         const loadSkills = React.useCallback(async (cwd, quiet = false) => {
           if (quiet) setRefreshing(true);
           else setSkillsState({ status: 'loading' });
@@ -925,6 +967,7 @@ window.__ModuleLoader__.load({
             const body = await api(`/skills${query}`);
             setSkillsState({ status: 'ready', data: body });
             setPathDraft((current) => current || body.projectRoot || '');
+            rememberPath(body.projectRoot || cwd);
             return { ok: true, count: Array.isArray(body.skills) ? body.skills.length : 0, root: body.projectRoot };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1022,6 +1065,21 @@ window.__ModuleLoader__.load({
           const result = await loadSkills(cwd, true);
           if (tab === 'catalog') await loadCatalog(cwd);
           reportLoad(result);
+        };
+
+        const chooseFolder = async () => {
+          setPickingFolder(true);
+          try {
+            const body = await api('/pick-folder', { method: 'POST' });
+            if (!body.path) return;
+            setPathDraft(body.path);
+            await loadSkills(body.path);
+            if (tab === 'catalog') await loadCatalog(body.path);
+          } catch (error) {
+            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+          } finally {
+            setPickingFolder(false);
+          }
         };
 
         const refresh = async () => {
@@ -2839,6 +2897,11 @@ window.__ModuleLoader__.load({
               ),
               h(
                 'button',
+                { style: styles.button, disabled: pickingFolder, onClick: chooseFolder },
+                pickingFolder ? t('loading') : t('chooseFolder'),
+              ),
+              h(
+                'button',
                 {
                   style: Object.assign({}, styles.button, styles.primary),
                   disabled: refreshing,
@@ -2847,6 +2910,37 @@ window.__ModuleLoader__.load({
                 refreshing ? t('loading') : t('refresh'),
               ),
             ),
+            recentPaths.length > 0
+              ? h(
+                  'div',
+                  {
+                    style: {
+                      display: 'flex',
+                      gap: 6,
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      marginTop: 8,
+                    },
+                  },
+                  h('span', { style: styles.note }, `${t('recentPlaces')}:`),
+                  recentPaths.map((path) =>
+                    h(
+                      'button',
+                      {
+                        key: path,
+                        title: path,
+                        style: Object.assign({}, styles.button, styles.small),
+                        onClick: () => {
+                          setPathDraft(path);
+                          loadSkills(path);
+                          if (tab === 'catalog') loadCatalog(path);
+                        },
+                      },
+                      shortPath(path),
+                    ),
+                  ),
+                )
+              : null,
             h(
               'div',
               { style: styles.tabs },

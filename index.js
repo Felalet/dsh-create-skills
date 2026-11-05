@@ -931,6 +931,22 @@ async function copySkillToWorkspace(ctx, view, body, res) {
   sendJson(res, 201, { ok: true, path: target });
 }
 
+// The host owns the folder dialog: the native backend opens one OS chooser and
+// returns the chosen absolute path (or null on cancel).
+async function pickFolder(ctx, res) {
+  const picker = ctx.get('directoryPicker');
+  if (!picker || typeof picker.capability !== 'function') {
+    throw new HttpError(501, 'directory picker is not available in this profile');
+  }
+  const capability = picker.capability();
+  if (!capability || capability.kind !== 'native') {
+    throw new HttpError(501, 'this profile only supports the in-app directory browser');
+  }
+  const controller = new AbortController();
+  const chosen = await capability.pick(controller.signal);
+  sendJson(res, 200, { path: typeof chosen === 'string' ? chosen : null });
+}
+
 function safeLabel(label) {
   const value = String(label ?? '')
     .trim()
@@ -1588,6 +1604,21 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await groupByTask(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/pick-folder`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          await pickFolder(ctx, res);
         } catch (error) {
           errorResponse(res, error);
         }
