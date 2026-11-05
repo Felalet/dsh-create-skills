@@ -662,7 +662,7 @@ function parseVerdict(text) {
   return { left: text.trim(), right: '', winner: 'tie' };
 }
 
-async function judgeVariants(ctx, prompt) {
+async function streamModel(ctx, system, prompt, maxTokens = 3000) {
   const llm = ctx.get('llm');
   if (!llm) throw new HttpError(503, 'llm service is not available in this profile');
   const model = ctx.get('agentDefaultModel');
@@ -678,10 +678,10 @@ async function judgeVariants(ctx, prompt) {
     const stream = llm.stream({
       provider: selection.provider,
       model: selection.model,
-      system: 'Ты — строгий и справедливый оценщик инструкций для ИИ-агентов. Отвечай только JSON, как просят.',
+      system,
       messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
       temperature: 0.2,
-      maxTokens: 3000,
+      maxTokens,
       signal: controller.signal,
     });
     for await (const chunk of stream) {
@@ -701,6 +701,15 @@ async function judgeVariants(ctx, prompt) {
   } finally {
     clearTimeout(timer);
   }
+  return text;
+}
+
+async function judgeVariants(ctx, prompt) {
+  const text = await streamModel(
+    ctx,
+    'Ты — строгий и справедливый оценщик инструкций для ИИ-агентов. Отвечай только JSON, как просят.',
+    prompt,
+  );
   return parseVerdict(text);
 }
 
@@ -713,6 +722,55 @@ async function compareVariants(ctx, view, body, res) {
     left: { name: left.name, label: left.label, body: left.body },
     right: { name: right.name, label: right.label, body: right.body },
     verdict,
+  });
+}
+
+function buildImprovePrompt(body, task) {
+  const clip = body.length > 12_000 ? body.slice(0, 12_000) : body;
+  const lines = [
+    'Ты — опытный редактор инструкций для ИИ-агента (скилл в формате Markdown).',
+    'Улучши инструкции: сделай шаги конкретнее, добавь недостающие проверки, убери воду, сохрани назначение и стиль.',
+  ];
+  if (task !== '') lines.push(`Цель, под которую улучшаем: ${task}.`);
+  lines.push(
+    'Верни ТОЛЬКО улучшенный Markdown без frontmatter, без пояснений и без обёртки ```.',
+    '',
+    'Текущие инструкции:',
+    clip,
+  );
+  return lines.join('\n');
+}
+
+function stripFences(text) {
+  const match = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i.exec(text.trim());
+  return (match ? match[1] : text).trim();
+}
+
+async function improveSkill(ctx, view, body, res) {
+  const original = await readVariant(ctx, view, { name: body.name, label: body.label });
+  const parsed = splitFrontmatter(original.raw);
+  const task = typeof body.task === 'string' ? body.task.trim() : '';
+  const text = await streamModel(
+    ctx,
+    'Ты — опытный редактор инструкций для ИИ-агентов. Возвращай только Markdown.',
+    buildImprovePrompt(parsed.body, task),
+    4000,
+  );
+  const improvedBody = stripFences(text);
+  if (improvedBody === '') throw new HttpError(502, 'model returned an empty improvement');
+
+  const projectRoot = await findProjectRoot(view.cwd);
+  const label = `ai-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+  const dir = join(versionsDir(projectRoot, original.name), label);
+  assertInside(dir, [join(projectRoot, '.dsh')]);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'SKILL.md'), `---\n${parsed.frontmatter}\n---\n\n${improvedBody}\n`, 'utf8');
+
+  sendJson(res, 200, {
+    skill: original.name,
+    label,
+    body: improvedBody,
+    original: { name: original.name, label: original.label, body: parsed.body },
   });
 }
 
@@ -835,6 +893,23 @@ export function apply(ctx) {
           const url = new URL(req.url ?? '/', 'http://localhost');
           const view = await resolveView(ctx, url.searchParams.get('cwd'));
           await compareVariants(ctx, view, await readJsonBody(req), res);
+        } catch (error) {
+          errorResponse(res, error);
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${PREFIX}api/improve`,
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' });
+            return;
+          }
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const view = await resolveView(ctx, url.searchParams.get('cwd'));
+          await improveSkill(ctx, view, await readJsonBody(req), res);
         } catch (error) {
           errorResponse(res, error);
         }

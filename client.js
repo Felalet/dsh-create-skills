@@ -74,6 +74,9 @@ window.__ModuleLoader__.load({
       compareTaskPlaceholder: 'Например: подготовить квартальный отчёт с таблицей',
       runCompare: 'Сравнить',
       comparing: 'Сравниваем…',
+      improve: 'Улучшить скилл',
+      improving: 'Улучшаем…',
+      improvedSaved: 'Улучшенная версия сохранена',
       chooseLeft: 'Выбрать левый',
       chooseRight: 'Выбрать правый',
       comparePick: 'Выберите скиллы слева и справа',
@@ -161,6 +164,9 @@ window.__ModuleLoader__.load({
       compareTaskPlaceholder: 'For example: prepare a quarterly report with a table',
       runCompare: 'Compare',
       comparing: 'Comparing…',
+      improve: 'Improve skill',
+      improving: 'Improving…',
+      improvedSaved: 'Improved version saved',
       chooseLeft: 'Choose left',
       chooseRight: 'Choose right',
       comparePick: 'Pick a skill on both sides',
@@ -473,6 +479,7 @@ window.__ModuleLoader__.load({
           result: null,
           versions: { left: [], right: [] },
         });
+        const [upgrading, setUpgrading] = React.useState(false);
         const [installScope, setInstallScope] = React.useState('project');
 
         const loadSkills = React.useCallback(async (cwd) => {
@@ -758,8 +765,10 @@ window.__ModuleLoader__.load({
           if (patch.skill !== undefined && patch.skill !== '') loadCompareVersions(side, patch.skill);
         };
 
-        const runCompare = async () => {
-          if (!compare.left.skill || !compare.right.skill) {
+        const runCompare = async (leftSpec, rightSpec) => {
+          const left = leftSpec || compare.left;
+          const right = rightSpec || compare.right;
+          if (!left.skill || !right.skill) {
             setCompare((current) => Object.assign({}, current, { error: t('comparePick') }));
             return;
           }
@@ -769,8 +778,8 @@ window.__ModuleLoader__.load({
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
-                left: { name: compare.left.skill, label: compare.left.label || undefined },
-                right: { name: compare.right.skill, label: compare.right.label || undefined },
+                left: { name: left.skill, label: left.label || undefined },
+                right: { name: right.skill, label: right.label || undefined },
                 task: compare.task,
               }),
             });
@@ -782,6 +791,42 @@ window.__ModuleLoader__.load({
                 error: error instanceof Error ? error.message : String(error),
               }),
             );
+          }
+        };
+
+        const improveNow = async () => {
+          if (!compare.left.skill) {
+            setCompare((current) => Object.assign({}, current, { error: t('comparePick') }));
+            return;
+          }
+          setUpgrading(true);
+          setCompare((current) => Object.assign({}, current, { error: null, result: null }));
+          try {
+            const improved = await api('/improve', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                name: compare.left.skill,
+                label: compare.left.label || undefined,
+                task: compare.task,
+              }),
+            });
+            setCompare((current) =>
+              Object.assign({}, current, {
+                right: { category: current.left.category, skill: improved.skill, label: improved.label },
+              }),
+            );
+            await loadCompareVersions('right', improved.skill);
+            setNotice({ kind: 'ok', text: `${t('improvedSaved')}: ${improved.label}` });
+            await runCompare(compare.left, { skill: improved.skill, label: improved.label });
+          } catch (error) {
+            setCompare((current) =>
+              Object.assign({}, current, {
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          } finally {
+            setUpgrading(false);
           }
         };
 
@@ -943,15 +988,24 @@ window.__ModuleLoader__.load({
             compare.error ? h('div', { style: styles.error }, compare.error) : null,
             h(
               'div',
-              { style: { marginTop: 10 } },
+              { style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
               h(
                 'button',
                 {
                   style: Object.assign({}, styles.button, styles.primary),
-                  disabled: compare.busy,
-                  onClick: runCompare,
+                  disabled: compare.busy || upgrading,
+                  onClick: () => runCompare(),
                 },
                 compare.busy ? t('comparing') : t('runCompare'),
+              ),
+              h(
+                'button',
+                {
+                  style: styles.button,
+                  disabled: compare.busy || upgrading,
+                  onClick: improveNow,
+                },
+                upgrading ? t('improving') : t('improve'),
               ),
             ),
             result
