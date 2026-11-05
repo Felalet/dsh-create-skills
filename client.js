@@ -86,6 +86,8 @@ window.__ModuleLoader__.load({
       catalogEmpty: 'В каталоге нет скиллов',
       catalogLoading: 'Загружаем каталог…',
       allInstalled: 'Все скиллы категории уже установлены',
+      catalogCreatedHint:
+        'Созданные вручную скиллы появляются во вкладке «Установленные», а не в каталоге.',
       installScope: 'Установить',
       previewSource: 'Источник',
       tabCompare: 'Сравнение',
@@ -232,6 +234,8 @@ window.__ModuleLoader__.load({
       catalogEmpty: 'The catalog is empty',
       catalogLoading: 'Loading catalog…',
       allInstalled: 'Every skill in this category is already installed',
+      catalogCreatedHint:
+        'Skills created by hand appear in the Installed tab, not in the catalog.',
       installScope: 'Install to',
       previewSource: 'Source',
       tabCompare: 'Compare',
@@ -378,6 +382,7 @@ window.__ModuleLoader__.load({
       catalogEmpty: '技能库中没有技能',
       catalogLoading: '正在加载技能库…',
       allInstalled: '该分类中的技能都已安装',
+      catalogCreatedHint: '手动创建的技能会出现在「已安装」标签页，而不是技能库。',
       installScope: '安装到',
       previewSource: '来源',
       tabCompare: '对比',
@@ -607,7 +612,7 @@ window.__ModuleLoader__.load({
         background: 'rgba(0, 0, 0, 0.45)',
       },
       modal: {
-        width: 'min(760px, 100%)',
+        width: 'min(920px, 100%)',
         maxHeight: '82vh',
         display: 'flex',
         flexDirection: 'column',
@@ -624,7 +629,7 @@ window.__ModuleLoader__.load({
       pre: {
         margin: 0,
         padding: 12,
-        maxHeight: '46vh',
+        maxHeight: '62vh',
         overflow: 'auto',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         fontSize: 12.5,
@@ -1080,6 +1085,9 @@ window.__ModuleLoader__.load({
             }
             setEditor(null);
             setCategoryDraft(null);
+            // A new skill lives in the installed list, not in the catalog, so
+            // show the list where it can actually be seen right away.
+            setTab('installed');
             await refresh();
           } catch (error) {
             setEditor((current) => ({
@@ -1957,7 +1965,7 @@ window.__ModuleLoader__.load({
               { style: styles.field },
               h('span', { style: styles.fieldLabel }, t('content')),
               h('textarea', {
-                style: styles.textarea,
+                style: Object.assign({}, styles.textarea, { minHeight: '42vh' }),
                 value: editor.content,
                 onChange: (event) => setEditor({ ...editor, content: event.target.value }),
               }),
@@ -2394,6 +2402,7 @@ window.__ModuleLoader__.load({
                 h('option', { value: 'user' }, t('scopeUser')),
               ),
             ),
+            h('div', { style: styles.note }, t('catalogCreatedHint')),
             catalog.categories.map((category) => {
               const entries = catalog.skills.filter((entry) => entry.category === category.id);
               const missing = entries.filter((entry) => !entry.installed);
