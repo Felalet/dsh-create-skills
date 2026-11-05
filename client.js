@@ -930,6 +930,8 @@ window.__ModuleLoader__.load({
         const [categoryDraft, setCategoryDraft] = React.useState(null);
         // Body of the last picked compare side, shown before a comparison runs.
         const [sidePreview, setSidePreview] = React.useState(null);
+        // Feedback next to the "Choose" button, so an apply is visible in place.
+        const [appliedNotice, setAppliedNotice] = React.useState(null);
         // Catalog preview: fetched on demand, so installing is a separate decision.
         const [preview, setPreview] = React.useState(null);
         // The editor and the versions panel render above the list; bumping this
@@ -1504,6 +1506,7 @@ window.__ModuleLoader__.load({
             return next;
           });
           if (patch.skill !== undefined) {
+            setAppliedNotice(null);
             loadSidePreview(side, patch);
             if (patch.skill !== '' && !patch.catalogId) loadCompareVersions(side, patch.skill);
           }
@@ -1550,6 +1553,7 @@ window.__ModuleLoader__.load({
             return;
           }
           setCompare((current) => Object.assign({}, current, { busy: true, error: null, result: null }));
+          setAppliedNotice(null);
           try {
             const body = await api('/compare', {
               method: 'POST',
@@ -1624,10 +1628,26 @@ window.__ModuleLoader__.load({
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ skill: pick.name, label: pick.label }),
               });
-              setNotice({ kind: 'ok', text: t('versionApplied') });
+              // The applied version becomes the left side, so "Improve" can run
+              // again from it without reselecting anything.
+              setCompare((current) =>
+                Object.assign({}, current, {
+                  left: {
+                    category: current.right.category,
+                    skill: pick.name,
+                    catalogId: '',
+                    label: pick.label,
+                  },
+                  error: null,
+                }),
+              );
+              await loadCompareVersions('left', pick.name);
+              setAppliedNotice({ side, kind: 'ok', text: `${t('versionApplied')}: ${pick.label}` });
               await refresh();
             } catch (error) {
-              setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+              const message = error instanceof Error ? error.message : String(error);
+              setNotice({ kind: 'error', text: message });
+              setAppliedNotice({ side, kind: 'error', text: message });
             }
             return;
           }
@@ -1650,12 +1670,16 @@ window.__ModuleLoader__.load({
                 body: JSON.stringify({ name: otherName, enabled: false }),
               });
               setNotice({ kind: 'ok', text: `${t('chosen')}: ${pick.name} · ${otherName} — off` });
+              setAppliedNotice({ side, kind: 'ok', text: `${t('chosen')}: ${pick.name}` });
             } else {
               setNotice({ kind: 'error', text: t('otherReadOnly') });
+              setAppliedNotice({ side, kind: 'error', text: t('otherReadOnly') });
             }
             await refresh();
           } catch (error) {
-            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice({ kind: 'error', text: message });
+            setAppliedNotice({ side, kind: 'error', text: message });
           }
         };
 
@@ -1932,12 +1956,31 @@ window.__ModuleLoader__.load({
               ),
               h('div', { style: Object.assign({}, styles.description, { whiteSpace: 'pre-wrap' }) }, verdict),
               h(
-                'button',
-                {
-                  style: Object.assign({}, styles.button, styles.small, styles.primary, { marginTop: 10 }),
-                  onClick: () => chooseVariant(side),
-                },
-                side === 'left' ? t('chooseLeft') : t('chooseRight'),
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+                h(
+                  'button',
+                  {
+                    style: Object.assign({}, styles.button, styles.small, styles.primary),
+                    onClick: () => chooseVariant(side),
+                  },
+                  side === 'left' ? t('chooseLeft') : t('chooseRight'),
+                ),
+                appliedNotice && appliedNotice.side === side
+                  ? h(
+                      'span',
+                      {
+                        style: Object.assign({}, styles.note, {
+                          marginTop: 0,
+                          color:
+                            appliedNotice.kind === 'error'
+                              ? 'var(--dsw-alias-state-error-primary)'
+                              : 'var(--dsw-alias-state-success-primary)',
+                        }),
+                      },
+                      appliedNotice.text,
+                    )
+                  : null,
               ),
             );
           };

@@ -912,6 +912,44 @@ async function listWorkspaceSkills(res) {
   sendJson(res, 200, { workspaces: result });
 }
 
+// Category ids known to one project: its custom list, the shipped catalog, and
+// the two source-derived ones. A copied skill keeps its category, and the
+// target project gets that category when it does not know it yet.
+async function resolveCategoryTitle(projectRoot, id) {
+  if (!id) return null;
+  const custom = await readCustomCategories(projectRoot);
+  const found = custom.find((category) => category.id === id);
+  if (found) return found.title;
+  try {
+    const catalog = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+    const known = (catalog.categories || []).find((category) => category.id === id);
+    if (known) return known.title;
+  } catch {
+    // a missing catalog only loses the title
+  }
+  if (id === 'mine') return 'Мои скиллы';
+  if (id === 'builtin') return 'Встроенные';
+  return id;
+}
+
+async function ensureCustomCategory(projectRoot, id, title) {
+  if (!id || !title) return false;
+  const { categories } = await mergedCategories(projectRoot);
+  if (categories.some((category) => category.id === id)) return false;
+  const custom = await readCustomCategories(projectRoot);
+  custom.push({ id, title });
+  await writeCustomCategories(projectRoot, custom);
+  return true;
+}
+
+async function categoryOfFile(file) {
+  try {
+    return parseCategory(splitFrontmatter(await readFile(file, 'utf8')).frontmatter);
+  } catch {
+    return '';
+  }
+}
+
 async function copySkillToWorkspace(ctx, view, body, res) {
   const name = typeof body.name === 'string' ? body.name : '';
   validateName(name);
@@ -930,7 +968,11 @@ async function copySkillToWorkspace(ctx, view, body, res) {
   const target = join(targetRoot, name);
   if (await exists(target)) throw new HttpError(409, `skill "${name}" already exists in this workspace`);
   await cp(source, target, { recursive: true });
-  sendJson(res, 201, { ok: true, path: target });
+  const category = await categoryOfFile(join(target, 'SKILL.md'));
+  if (category) {
+    await ensureCustomCategory(projectRoot, category, await resolveCategoryTitle(from, category));
+  }
+  sendJson(res, 201, { ok: true, path: target, category });
 }
 
 // The host owns the folder dialog: the native backend opens one OS chooser and
@@ -977,7 +1019,11 @@ async function collectSkills(ctx, view, res) {
         continue;
       }
       await cp(source, target, { recursive: true });
-      copied.push({ name: entry.name, from: workspace.title });
+      const category = await categoryOfFile(join(target, 'SKILL.md'));
+      if (category) {
+        await ensureCustomCategory(projectRoot, category, await resolveCategoryTitle(workspace.path, category));
+      }
+      copied.push({ name: entry.name, from: workspace.title, category });
     }
   }
   sendJson(res, 200, { ok: true, copied, skipped });
