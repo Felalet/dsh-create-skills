@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
       load: 'Загрузить',
       chooseFolder: 'Выбрать папку…',
       recentPlaces: 'Недавние',
+      restartHint: 'Похоже, приложение не перезапущено после обновления плагина — перезапустите DSH.',
       pathPlaceholder: 'Путь к проекту',
       loading: 'Загрузка…',
       saving: 'Сохраняем…',
@@ -178,6 +179,7 @@ window.__ModuleLoader__.load({
       load: 'Load',
       chooseFolder: 'Choose folder…',
       recentPlaces: 'Recent',
+      restartHint: 'DSH looks not restarted after the plugin update — restart the app.',
       pathPlaceholder: 'Project path',
       loading: 'Loading…',
       saving: 'Saving…',
@@ -336,6 +338,7 @@ window.__ModuleLoader__.load({
       load: '加载',
       chooseFolder: '选择文件夹…',
       recentPlaces: '最近',
+      restartHint: 'DSH 似乎未在插件更新后重启，请重启应用。',
       pathPlaceholder: '项目路径',
       loading: '加载中…',
       saving: '正在保存…',
@@ -1067,16 +1070,29 @@ window.__ModuleLoader__.load({
           reportLoad(result);
         };
 
+        const switchToPath = async (path) => {
+          const target = String(path || '').trim();
+          if (target === '') return;
+          setPathDraft(target);
+          const result = await loadSkills(target, true);
+          if (tab === 'catalog') await loadCatalog(target);
+          reportLoad(result);
+          rememberPath(target);
+        };
+
         const chooseFolder = async () => {
           setPickingFolder(true);
           try {
             const body = await api('/pick-folder', { method: 'POST' });
             if (!body.path) return;
-            setPathDraft(body.path);
-            await loadSkills(body.path);
-            if (tab === 'catalog') await loadCatalog(body.path);
+            await switchToPath(body.path);
           } catch (error) {
-            setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            const stale = message.includes('HTTP 404') || message.includes('HTTP 405');
+            setNotice({
+              kind: 'error',
+              text: stale ? `${message} · ${t('restartHint')}` : message,
+            });
           } finally {
             setPickingFolder(false);
           }
@@ -2929,12 +2945,14 @@ window.__ModuleLoader__.load({
                       {
                         key: path,
                         title: path,
-                        style: Object.assign({}, styles.button, styles.small),
-                        onClick: () => {
-                          setPathDraft(path);
-                          loadSkills(path);
-                          if (tab === 'catalog') loadCatalog(path);
-                        },
+                        disabled: path === pathDraft,
+                        style: Object.assign(
+                          {},
+                          styles.button,
+                          styles.small,
+                          path === pathDraft ? styles.primary : null,
+                        ),
+                        onClick: () => switchToPath(path),
                       },
                       shortPath(path),
                     ),
